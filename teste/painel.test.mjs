@@ -485,3 +485,14 @@ test('pipeline: commit que caiu fica parou, não feita', () => {
   const p = missoes(raiz)[0].milestones[0].features[0].pipeline
   assert.deepEqual(p.map(x => x.estado), ['feita', 'feita', 'pulada', 'parou'])
 })
+
+test('modelo e effort de cada agente vêm do registro dele', () => {
+  const raiz = temp()
+  const dir = execucao(raiz, 'wf_1', [...inicio, ['F1 Admin: base e Contas', undefined]])
+  appendFileSync(join(dir, 'agent-wf_1-2.jsonl'), JSON.stringify({ type: 'assistant', effort: 'high', message: { id: 'z', model: 'claude-opus-5-5', content: [] } }) + '\n')
+  const [m] = missoes(raiz)
+  const c = m.milestones[0].features[0].chamadas[0]
+  assert.equal(c.modelo, 'claude-opus-5-5')
+  assert.equal(c.effort, 'high')
+  assert.equal(m.agora.effort, 'high')
+})

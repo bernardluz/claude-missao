@@ -79,7 +79,7 @@ const numero = v => (Number.isFinite(Number(v)) ? Number(v) : 0)
 
 export function lerAgente(arquivo) {
   return lerIncremental(arquivo, (e, o) => {
-    if (!e) return { inicio: null, fim: null, cwd: null, prompt: '', respondeu: false, uso: new Map(), mtime: 0 }
+    if (!e) return { inicio: null, fim: null, cwd: null, prompt: '', respondeu: false, uso: new Map(), modelo: null, effort: null, mtime: 0 }
     if (o.timestamp) {
       e.inicio ??= o.timestamp
       e.fim = o.timestamp
@@ -87,8 +87,11 @@ export function lerAgente(arquivo) {
     e.cwd ??= o.cwd ?? null
     // O harness pode mandar o pedido do usuário e a tarefa calculada em mensagens separadas: o prompt é tudo o que
     // chega antes da primeira resposta.
-    if (o.type === 'assistant') e.respondeu = true
-    else if (o.type === 'user' && !e.respondeu) e.prompt += textoDe(o.message?.content) + '\n'
+    if (o.type === 'assistant') {
+      e.respondeu = true
+      if (typeof o.message?.model === 'string') e.modelo = o.message.model
+      if (typeof o.effort === 'string') e.effort = o.effort
+    } else if (o.type === 'user' && !e.respondeu) e.prompt += textoDe(o.message?.content) + '\n'
     const u = o.message?.usage
     const id = o.message?.id
     if (u && id) {
@@ -258,7 +261,7 @@ export function lerExecucao(dir) {
       cwd ??= agente.cwd
     }
     const duracaoMs = agente?.inicio && agente?.fim ? Date.parse(agente.fim) - Date.parse(agente.inicio) : 0
-    return { ...c, ordem, ...classificar(c.label), inicio: agente?.inicio ?? null, duracaoMs, tokens: tokensDe(agente), agente }
+    return { ...c, ordem, ...classificar(c.label), inicio: agente?.inicio ?? null, duracaoMs, tokens: tokensDe(agente), modelo: agente?.modelo ?? null, effort: agente?.effort ?? null, agente }
   })
   const skillsChamada = chamadas.find(c => c.label === 'skills da missão')
   const skills = Array.isArray(skillsChamada?.resultado?.skills) ? skillsChamada.resultado.skills : []
@@ -406,7 +409,7 @@ function montarMissao(id, runs) {
       duracaoMs: cs.reduce((s, c) => s + c.duracaoMs, 0),
       tokens: cs.reduce((s, c) => s + c.tokens.total, 0),
       agentes: cs.length,
-      chamadas: cs.map(c => ({ ref: c.ref, label: c.label, tipo: c.tipo, rodada: c.rodada ?? null, inicio: c.inicio, duracaoMs: c.duracaoMs, estado: estadoChamada(c) })),
+      chamadas: cs.map(c => ({ ref: c.ref, label: c.label, tipo: c.tipo, rodada: c.rodada ?? null, inicio: c.inicio, duracaoMs: c.duracaoMs, estado: estadoChamada(c), modelo: c.modelo, effort: c.effort })),
       pipeline: pipelineDe(cs, !!commit),
     }
   }
@@ -462,7 +465,7 @@ function montarMissao(id, runs) {
     estado,
     progresso: { feitas, total },
     atual: emCurso ? rotuloEtapa(emCurso) : null,
-    agora: emCurso ? { ref: emCurso.ref, label: emCurso.label, inicio: emCurso.inicio, etapa: rotuloEtapa(emCurso) } : null,
+    agora: emCurso ? { ref: emCurso.ref, label: emCurso.label, inicio: emCurso.inicio, etapa: rotuloEtapa(emCurso), modelo: emCurso.modelo, effort: emCurso.effort } : null,
     featureAtual: featureAtual ? { titulo: featureAtual.titulo, milestone: featureAtual.milestone, pipeline: featureAtual.pipeline } : null,
     ultimoEvento: ultimaChamada ? { label: ultimaChamada.label, resumo: resumoDe(ultimaChamada) } : null,
     inicio: runs[0].inicio,
@@ -474,7 +477,7 @@ function montarMissao(id, runs) {
     milestones,
     skills: ultima.skills.length ? ultima.skills : runs.findLast(r => r.skills.length)?.skills ?? [],
     linhaDoTempo: linhaDoTempo.slice(-40).reverse().map(c => ({
-      ref: c.ref, label: c.label, execucao: c.execucao, inicio: c.inicio, duracaoMs: c.duracaoMs, tokens: c.tokens.total,
+      ref: c.ref, label: c.label, modelo: c.modelo, effort: c.effort, execucao: c.execucao, inicio: c.inicio, duracaoMs: c.duracaoMs, tokens: c.tokens.total,
       estado: c.aberta ? (c.viva ? 'rodando' : 'interrompido') : c.caiu ? 'caiu' : 'ok', resumo: resumoDe(c),
     })),
   }

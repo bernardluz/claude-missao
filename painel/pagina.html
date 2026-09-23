@@ -182,6 +182,9 @@ const ha = t => { const s = Math.round((Date.now() - num(typeof t === 'string' ?
 const hora = t => t ? new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
 const quando = t => t ? new Date(t).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
 const tokens = v => { const n = num(v); return n >= 1e6 ? `${(n / 1e6).toFixed(1).replace('.', ',')} M` : n >= 1e3 ? `${Math.round(n / 1e3)} k` : String(n) }
+// claude-opus-5-5 → Opus 5.5; claude-sonnet-5 → Sonnet 5
+const nomeModelo = m => { const x = String(m ?? '').match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/); return x ? `${x[1][0].toUpperCase()}${x[1].slice(1)} ${x[2]}${x[3] ? `.${x[3]}` : ''}` : String(m ?? '') }
+const perfil = c => [nomeModelo(c?.modelo), c?.effort].filter(Boolean).join(' · ')
 const curto = t => String(t ?? '').replace(/^(F\d+|M\d+|correção [\d.]+)\s/, '$1 · ')
 
 const SVG = {
@@ -254,7 +257,7 @@ function renderFeature(f, prefixo, padraoAberto) {
   const meta = [num(f.rodadasAjuste) ? `${num(f.rodadasAjuste)} ajuste${num(f.rodadasAjuste) > 1 ? 's' : ''}` : '', num(f.quedas) ? `${num(f.quedas)} queda(s)` : '', f.duracaoMs ? duracao(f.duracaoMs) : ''].filter(Boolean).join(' · ')
   const probs = f.revisao?.problemas ?? []
   const dentro = [
-    f.chamadas?.length ? `<div><div class="rotulo suave" style="margin-bottom:6px">Agentes · clique para ver ao vivo</div><div class="chips">${f.chamadas.map(c => `<button class="chip ${vivo.ref === c.ref ? 'on' : ''}" data-ref="${esc(c.ref)}" data-label="${esc(c.label)}">${esc(rotuloAgente(c))}</button>`).join('')}</div></div>` : '<div class="suave">Ainda não começou.</div>',
+    f.chamadas?.length ? `<div><div class="rotulo suave" style="margin-bottom:6px">Agentes · clique para ver ao vivo</div><div class="chips">${f.chamadas.map(c => `<button class="chip ${vivo.ref === c.ref ? 'on' : ''}" data-ref="${esc(c.ref)}" data-label="${esc(c.label)}" data-perfil="${esc(perfil(c))}">${esc(rotuloAgente(c))}${perfil(c) ? ` <span class="suave">· ${esc(perfil(c))}</span>` : ''}</button>`).join('')}</div></div>` : '<div class="suave">Ainda não começou.</div>',
     probs.length ? `<div><div class="rotulo suave" style="margin-bottom:6px">Última revisão · ${f.revisao.aprovado ? 'aprovada' : `${probs.length} apontamento(s)`}</div>${probs.map(p => `<div class="apont"><span class="tag">${f.revisao.aprovado ? 'nota' : 'achado'}</span><span>${esc(p.problema ?? JSON.stringify(p))}</span></div>`).join('')}</div>` : f.revisao?.aprovado ? '<div>Revisão independente aprovada.</div>' : '',
     f.semCommitRegistrado ? '<div class="suave">Concluída sem commit registrado pela missão; o milestone foi validado.</div>' : '',
     f.motivoCommit && f.estado !== 'feita' ? `<div><div class="rotulo suave">Commit recusado</div><pre>${esc(f.motivoCommit)}</pre></div>` : '',
@@ -276,7 +279,7 @@ function esqueleto(m) {
     <aside class="col"><section class="cartao"><div class="cab"><h2>Atividade</h2><span class="suave" style="font-size:12px">clique para ver ao vivo</span></div><div class="ativ" id="ativ"></div></section>
       <section class="cartao"><div class="cab"><h2>Commits</h2><span class="suave" style="font-size:12px" id="n-commits"></span></div><div class="commits" id="commits"></div></section>
       <section class="cartao"><details class="bloco" data-id="skills" ${aberto('skills') ? 'open' : ''}><summary class="cab" style="border-bottom:0"><h2>Skills da missão</h2><span class="suave" style="font-size:12px" id="n-skills"></span></summary><div id="skills"></div></details></section></aside></div>`
-  $('#vivo-seguir').onclick = () => { vivo.seguir = !vivo.seguir; if (vivo.seguir && missaoAtual?.agora) abrirVivo(missaoAtual.agora.ref, missaoAtual.agora.label); pintarSeguir() }
+  $('#vivo-seguir').onclick = () => { vivo.seguir = !vivo.seguir; if (vivo.seguir && missaoAtual?.agora) abrirVivo(missaoAtual.agora.ref, missaoAtual.agora.label, perfil(missaoAtual.agora)); pintarSeguir() }
   $('#vivo-tarefa').onclick = () => { vivo.mostrarTarefa = !vivo.mostrarTarefa; $('#vivo-tarefa').classList.toggle('on', vivo.mostrarTarefa); desenharFeed(false) }
   pintarSeguir()
   vivo.passos = []; vivo.total = 0; vivo.ref = null; vivo.geracao++
@@ -328,23 +331,25 @@ function renderDetalhe(m) {
       ${x.features.map(y => renderFeature(y, `o${i}`, false)).join('')}${x.correcoes.map(y => renderFeature(y, `oc${i}`, false)).join('')}</details>`).join('')}</section>`
 
   const pontoCor = e => e === 'rodando' ? 'var(--azul)' : e === 'ok' ? 'var(--verde)' : e === 'caiu' || e === 'interrompido' ? 'var(--vermelho)' : 'var(--suave)'
-  $('#ativ').innerHTML = m.linhaDoTempo.slice(0, 12).map(c => `<button data-ref="${esc(c.ref)}" data-label="${esc(c.label)}"><span class="ponto" style="background:${pontoCor(c.estado)}"></span><span class="txt"><b>${esc(curto(c.label))}</b><span>${esc(c.estado === 'rodando' ? 'rodando agora' : c.resumo ?? NOMES[c.estado] ?? '')}${c.duracaoMs ? ` · ${esc(duracao(c.duracaoMs))}` : ''}</span></span><span class="qdo">${esc(c.inicio ? ha(c.inicio) : '')}</span></button>`).join('')
+  $('#ativ').innerHTML = m.linhaDoTempo.slice(0, 12).map(c => `<button data-ref="${esc(c.ref)}" data-label="${esc(c.label)}" data-perfil="${esc(perfil(c))}"><span class="ponto" style="background:${pontoCor(c.estado)}"></span><span class="txt"><b>${esc(curto(c.label))}</b><span>${esc(c.estado === 'rodando' ? 'rodando agora' : c.resumo ?? NOMES[c.estado] ?? '')}${c.duracaoMs ? ` · ${esc(duracao(c.duracaoMs))}` : ''}${perfil(c) ? ` · ${esc(perfil(c))}` : ''}</span></span><span class="qdo">${esc(c.inicio ? ha(c.inicio) : '')}</span></button>`).join('')
   $('#commits').innerHTML = m.commits?.length ? m.commits.slice(0, 8).map(c => `<div><span class="mono" style="color:var(--azul)">${esc(c.sha)}</span><span title="${esc(c.assunto)}">${esc(c.assunto)}</span></div>`).join('') : '<div class="suave">Nenhum commit ainda.</div>'
   $('#n-commits').textContent = m.commits?.length ? `${m.commits.length} no intervalo` : ''
   $('#skills').innerHTML = m.skills.map(s => `<div class="skill"><details class="bloco" data-id="sk:${esc(s.nome)}" ${aberto(`sk:${s.nome}`) ? 'open' : ''}><summary><b style="font-weight:500">${esc(s.nome)}</b> <span class="suave" style="font-size:12px">· ${s.features.length} features</span></summary><pre>${esc(s.guia)}</pre></details></div>`).join('')
   $('#n-skills').textContent = String(m.skills.length)
-  for (const b of document.querySelectorAll('#detalhe [data-ref]')) b.onclick = e => { e.preventDefault(); vivo.seguir = false; pintarSeguir(); abrirVivo(b.dataset.ref, b.dataset.label) }
-  if (vivo.seguir && m.agora && m.agora.ref !== vivo.ref) abrirVivo(m.agora.ref, m.agora.label)
-  else if (!vivo.ref && m.linhaDoTempo[0]) abrirVivo(m.linhaDoTempo[0].ref, m.linhaDoTempo[0].label)
+  for (const b of document.querySelectorAll('#detalhe [data-ref]')) b.onclick = e => { e.preventDefault(); vivo.seguir = false; pintarSeguir(); abrirVivo(b.dataset.ref, b.dataset.label, b.dataset.perfil) }
+  if (vivo.seguir && m.agora && m.agora.ref !== vivo.ref) abrirVivo(m.agora.ref, m.agora.label, perfil(m.agora))
+  else if (!vivo.ref && m.linhaDoTempo[0]) abrirVivo(m.linhaDoTempo[0].ref, m.linhaDoTempo[0].label, perfil(m.linhaDoTempo[0]))
+  else if (vivo.ref && !vivo.perfil) { const c = m.linhaDoTempo.find(x => x.ref === vivo.ref); if (c && perfil(c)) { vivo.perfil = perfil(c); pintarQuem() } }
 }
 
 // ---------- ao vivo ----------
 const vivo = { geracao: 0, ref: null, label: '', passos: [], total: 0, seguir: true, mostrarTarefa: false, carregando: false }
 function pintarSeguir() { const b = $('#vivo-seguir'); if (b) { b.classList.toggle('on', vivo.seguir); b.textContent = vivo.seguir ? 'Seguindo o atual' : 'Seguir o atual' } }
-function abrirVivo(ref, label) {
+function pintarQuem() { const q = $('#vivo-quem'); if (q) q.textContent = curto(vivo.label) + (vivo.perfil ? ` · ${vivo.perfil}` : '') }
+function abrirVivo(ref, label, perfilAgente = '') {
   if (ref !== vivo.ref) { vivo.passos = []; vivo.total = 0; vivo.geracao++ }
-  vivo.ref = ref; vivo.label = label
-  const q = $('#vivo-quem'); if (q) q.textContent = curto(label)
+  vivo.ref = ref; vivo.label = label; vivo.perfil = perfilAgente
+  pintarQuem()
   for (const c of document.querySelectorAll('.chip[data-ref]')) c.classList.toggle('on', c.dataset.ref === ref)
   desenharFeed(true)
   buscarPassos()
