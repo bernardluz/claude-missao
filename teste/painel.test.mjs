@@ -347,3 +347,76 @@ test('limites: sessões em paralelo não baixam o uso da mesma janela e valor nu
   assert.equal(extrairLimites({ rate_limits: { five_hour: { used_percentage: null, resets_at: 1 } } }), null)
   assert.equal(extrairLimites({ rate_limits: { five_hour: { used_percentage: '', resets_at: 1 } } }), null)
 })
+
+test('limites pelo CLI: lê o rate_limit_event do stream-json', async () => {
+  const { limitesDaSaida } = await import('../painel/limites-cli.mjs')
+  const saida = [
+    '{"type":"system","subtype":"init"}',
+    'linha quebrada {',
+    '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.2,"resetsAt":1790191800},"seven_day":{"utilization":0.66,"resetsAt":1790586000}}}}',
+    '{"type":"result","subtype":"success"}',
+  ].join('\n')
+  assert.deepEqual(limitesDaSaida(saida), { cincoHoras: { usado: 20, zeraEm: 1790191800000 }, semanal: { usado: 66, zeraEm: 1790586000000 } })
+  assert.equal(limitesDaSaida('{"type":"result"}'), null)
+  assert.equal(limitesDaSaida(''), null)
+})
+
+test('limites pelo CLI: agenda consulta só quando a leitura está velha e grava o resultado', async () => {
+  const { agendarLimites } = await import('../painel/limites-cli.mjs')
+  const { gravarLimites, arquivoLimites } = await import('../painel/statusline.mjs')
+  const { readFileSync } = await import('node:fs')
+  const raiz = temp()
+  let chamadas = 0
+  const consultar = async () => { chamadas++; return { cincoHoras: { usado: 30, zeraEm: Date.now() + 3600e3 }, semanal: null } }
+  let parar = agendarLimites({ raiz, minutos: 10, consultar })
+  await new Promise(r => setTimeout(r, 50))
+  parar()
+  assert.equal(chamadas, 1)
+  assert.equal(JSON.parse(readFileSync(arquivoLimites(raiz), 'utf8')).cincoHoras.usado, 30)
+  // Leitura recente (ex.: statusline): não consulta de novo.
+  gravarLimites({ cincoHoras: { usado: 31, zeraEm: Date.now() + 3600e3 }, semanal: null }, arquivoLimites(raiz))
+  parar = agendarLimites({ raiz, minutos: 10, consultar })
+  await new Promise(r => setTimeout(r, 50))
+  parar()
+  assert.equal(chamadas, 1)
+  assert.equal(agendarLimites({ raiz, minutos: 0, consultar })(), undefined)
+})
+
+test('limites pelo CLI: intervalo abaixo do piso não dispara consultas em rajada', async () => {
+  const { agendarLimites } = await import('../painel/limites-cli.mjs')
+  const raiz = temp()
+  let chamadas = 0
+  const parar = agendarLimites({ raiz, minutos: 0.001, consultar: async () => { chamadas++; return null }, checarACadaMs: 5 })
+  await new Promise(r => setTimeout(r, 120))
+  parar()
+  assert.equal(chamadas, 1)
+})
+
+test('limites pelo CLI: falha seguida dobra a espera e sucesso volta ao intervalo', async () => {
+  const { agendarLimites } = await import('../painel/limites-cli.mjs')
+  const raiz = temp()
+  const MINUTO = 60 * 1000
+  let relogio = 1e12
+  const respostas = [null, null, { cincoHoras: { usado: 10, zeraEm: 2e12 }, semanal: null }]
+  const quando = []
+  const consultar = async () => { quando.push(relogio); return respostas.shift() ?? null }
+  const parar = agendarLimites({ raiz, minutos: 10, consultar, agora: () => relogio, checarACadaMs: 2 })
+  const esperar = () => new Promise(r => setTimeout(r, 25))
+  await esperar()
+  relogio += 19 * MINUTO; await esperar()   // 1ª falha: espera 20 min, ainda não
+  relogio += 1 * MINUTO; await esperar()    // 20 min: 2ª tentativa
+  relogio += 39 * MINUTO; await esperar()   // 2ª falha: espera 40 min, ainda não
+  relogio += 1 * MINUTO; await esperar()    // 40 min: 3ª tentativa, sucesso
+  relogio += 9 * MINUTO; await esperar()    // leitura nova tem 9 min: não consulta
+  parar()
+  assert.deepEqual(quando.map(t => (t - 1e12) / MINUTO), [0, 20, 60])
+})
+
+test('limites pelo CLI: acha o executável pelo PATH, ignorando a pasta de trabalho', async () => {
+  const { acharExecutavel } = await import('../painel/limites-cli.mjs')
+  const dir = temp()
+  const nome = process.platform === 'win32' ? 'claude.exe' : 'claude'
+  writeFileSync(join(dir, nome), '')
+  assert.equal(acharExecutavel('claude', dir), join(dir, nome))
+  assert.equal(acharExecutavel('claude', ''), null)
+})

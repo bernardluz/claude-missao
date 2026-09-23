@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { missoes, commitsDaMissao, raizPadrao } from './leitor.mjs'
 import { arquivoLimites } from './statusline.mjs'
+import { agendarLimites, INTERVALO_MIN_MINUTOS } from './limites-cli.mjs'
 
 const PAGINA = path.join(path.dirname(fileURLToPath(import.meta.url)), 'pagina.html')
 
@@ -63,7 +64,11 @@ export function criarServidor({ raiz = raizPadrao(), porta }) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const porta = Number(process.env.PAINEL_PORTA ?? 4610)
   const raiz = raizPadrao()
+  // Limites da assinatura pelo claude CLI a cada PAINEL_LIMITES_MIN minutos (padrão 10; 0 desliga).
+  const minutos = Number(process.env.PAINEL_LIMITES_MIN ?? 10)
   criarServidor({ raiz, porta }).listen(porta, '127.0.0.1', () => {
     console.log(`Painel das missões em http://127.0.0.1:${porta} (lendo ${raiz})`)
+    if (minutos > 0) console.log(`Limites da assinatura: consulta pelo claude CLI a cada ${Math.max(minutos, INTERVALO_MIN_MINUTOS)} min`)
+    agendarLimites({ raiz, minutos })
   })
 }

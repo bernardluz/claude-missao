@@ -145,9 +145,16 @@ Para ativar, ponha isto em `~/.claude/settings.json`:
 "statusLine": { "type": "command", "command": "node \"<caminho>/claude-missao/painel/statusline.mjs\"", "padding": 0 }
 ```
 
-A statusline só roda com uma sessão do Claude Code aberta no terminal (o app desktop não a usa).
-Sem sessão aberta, a página mostra há quanto tempo foi a última leitura. O limite semanal por
-modelo e o uso extra não fazem parte do JSON da statusline, por isso não aparecem.
+A statusline só roda com uma sessão do Claude Code aberta no terminal, e só atualiza quando essa
+sessão conversa com a API. Por isso o servidor do painel também consulta sozinho, a cada 10 minutos
+(`PAINEL_LIMITES_MIN`; `0` desliga), sempre que a última leitura for mais velha que isso. A consulta
+roda o `claude` CLI em modo não interativo, com o mínimo possível, e lê o evento `rate_limit_event`
+da saída:
+- Haiku, sem ferramentas, sem MCP, sem settings do usuário;
+- sem salvar a sessão, com prompt curto e pasta vazia.
+
+Cada consulta leva cerca de 850 tokens e não carrega settings nem hooks do usuário. O intervalo tem piso de 5 minutos, e cada consulta sem resultado dobra a espera, até 1 hora. O limite semanal por modelo e o uso extra não vêm em
+nenhuma das duas fontes, por isso não aparecem.
 
 O servidor só escuta em 127.0.0.1 e recusa requisições cujo Host não seja `127.0.0.1` ou
 `localhost`. Algumas regras de leitura:
