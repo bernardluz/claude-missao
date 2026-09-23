@@ -1,0 +1,129 @@
+# claude-missao
+
+Workflow do Claude Code que executa um plano grande em **milestones**, no estilo das
+[Factory Missions](https://docs.factory.ai/missions/overview): cada feature é implementada por um
+agente novo, revisada por um revisor independente e commitada de forma atômica; cada milestone é
+validado e corrigido em loop até fechar.
+
+## Como funciona
+
+```
+Preparar  → confere árvore limpa, branch, HEAD e raiz do repositório
+Skills    → um agente só-leitura escreve guias por tipo de feature (vivem só na execução)
+
+Para cada milestone:
+  Para cada feature, em série:
+    implementa (sem commit) → revisão independente → ajustes até aprovar → commit atômico
+  Validar ◄───────────────────────────┐
+     │ aprovou? não → Corrigir (cada problema vira uma feature, com revisão e commit próprios)
+     ▼ sim
+  próximo milestone
+```
+
+O loop de correção segue enquanto a validação aponta **menos** problemas que na rodada anterior.
+Ele para e devolve o controle quando não há progresso, quando atinge o teto de rodadas ou quando
+uma rodada traz problemas demais.
+
+**Garantias:**
+
+- **Commit só com revisão.** O agente de commit nunca altera código. Se um gate do commit falha, a
+  falha vira ajuste e passa pela revisão de novo.
+- **Git conferido.** Um agente só-leitura confere o git real, sem confiar no relato dos workers:
+  branch, árvore limpa e a lista exata de commits. Commit de outra sessão no intervalo faz a missão
+  parar.
+- **Quedas retentadas com segurança.**
+  - Agente que cai (modelo ou API) é retentado.
+  - Worker que caiu deixando diff parcial é continuado por outro.
+  - Commit que caiu depois de commitar só é adotado se tiver exatamente arquivos da feature
+    revisada.
+- **Retomada.** Toda parada devolve um objeto `retomar`. Passado em `args.retomar` numa nova
+  execução, a missão continua do milestone interrompido, desde que o repositório esteja exatamente
+  como ficou.
+
+## Instalar num projeto
+
+1. **Opcional:** crie `.claude/missao.config.json` no projeto. Veja [configuração](#configuração)
+   e o exemplo em [`exemplos/brivae.config.json`](exemplos/brivae.config.json).
+2. Gere a cópia instalada:
+
+   ```bash
+   node instalar.mjs ../meu-projeto
+   ```
+
+   Isso grava `.claude/workflows/missao.js` no projeto, com a configuração embutida. Versione os
+   dois arquivos no projeto.
+3. Para saber se a cópia do projeto ficou desatualizada em relação a este repositório:
+
+   ```bash
+   node instalar.mjs ../meu-projeto --verificar
+   ```
+
+Não edite a cópia instalada. Altere o núcleo aqui, ou a configuração no projeto, e reinstale.
+O instalador só sobrescreve um `missao.js` que ele mesmo gerou. Para substituir uma versão mantida à mão,
+revise-a e use `--forcar`.
+
+## Configuração
+
+Todas as chaves são opcionais. Sem configuração, o workflow usa o agente padrão e textos genéricos.
+
+| Chave | O que faz | Padrão |
+|---|---|---|
+| `regrasTestes` | Arquivo com a política de testes, citado aos workers | texto genérico |
+| `regrasProjeto` | Arquivo que exige a revisão independente, citado aos workers | não cita |
+| `revisor` | `agentType` do revisor (só leitura) | agente padrão |
+| `revisoresPorPasta` | `[{ prefixo, agentType }]`: vale quando **todos** os arquivos estão no prefixo | `[]` |
+| `leitor` | `agentType` só-leitura para as skills e a conferência do git | agente padrão |
+| `proibicoesExtras` | Proibições somadas às de git, por exemplo variáveis que desligam gates | `[]` |
+| `formatoCommit` | Formato da mensagem de commit | `` `<tipo>: <descrição>` `` |
+| `idioma` | Idioma da mensagem de commit | `pt-BR` |
+| `exemplosSkills` | Exemplos de tipos de trabalho para o agente das skills | genérico |
+
+Os `agentType` precisam existir no projeto, em `.claude/agents/`. Prefira um `revisor` e um `leitor` que
+tenham só ferramentas de leitura. O agente padrão pode escrever e só obedece à instrução do prompt.
+
+O instalador recusa chave desconhecida e tipo errado. O formato de `revisoresPorPasta` é conferido quando o
+workflow roda.
+
+## Rodar
+
+Com o workflow instalado, peça ao Claude Code para rodar o workflow `missao` com o plano em `args`.
+Se o workflow tiver sido instalado com a sessão já aberta, ele ainda não aparece pelo nome, porque o
+catálogo é carregado ao abrir a sessão. Nesse caso, rode pelo caminho
+`.claude/workflows/missao.js`.
+
+Plano de exemplo: [`exemplos/plano-teste.json`](exemplos/plano-teste.json). Ele cria só a pasta
+descartável `missao-teste/`.
+
+| `args` | Padrão | |
+|---|---|---|
+| `milestones` | obrigatório | `[{ titulo, criterio, features: [{ titulo, spec }] }]`, com títulos únicos |
+| `maxFeaturesPorMilestone` | 8 | Plano com milestone maior é recusado; divida-o |
+| `maxRodadasRevisao` | 3 | Rodadas de ajuste por feature antes de parar |
+| `maxRodadasCorrecao` | 5 | Teto do loop validar/corrigir por milestone |
+| `maxProblemasPorRodada` | 10 | Acima disso, o plano provavelmente está errado |
+| `maxRetentativasInfra` | 2 | Retentativas quando um agente não retorna; `0` faz o pulo manual interromper |
+| `retomar` | — | Objeto `retomar` devolvido pela execução que parou |
+| `config` | — | Ajusta só `formatoCommit`, `idioma` e `exemplosSkills` nesta execução. Revisor, leitor e proibições vêm sempre da configuração instalada |
+
+**Custo esperado:** `2 + 3 × features + 4 × milestones` agentes, sem contar correções e
+retentativas.
+
+## Limitações
+
+- **Workers não lançam subagentes.** No Workflow, os agentes não têm a ferramenta `Agent`, nem com
+  `agentType: general-purpose`. Por isso quem chama o revisor é o script.
+- **Revisor novo a cada rodada.** O Workflow não continua uma conversa, então cada rodada de revisão
+  usa um revisor novo, que recebe os apontamentos da rodada anterior.
+- **Caminhos.** Caminho relativo a uma subpasta e grafias raras do Windows (nome curto 8.3, junction,
+  WSL) não são convertidos. Nesses casos a missão para, em vez de commitar algo errado.
+- **Nomes das features.** Não renomeie features entre uma execução e a retomada: o que já foi feito
+  é reconhecido pelo título exato.
+
+## Desenvolvimento
+
+```bash
+npm test
+```
+
+Os testes rodam o workflow com agentes falsos e um git simulado ([`teste/simulador.mjs`](teste/simulador.mjs)).
+Eles cobrem o fluxo por feature, o loop de correção, quedas, retomada, configuração e o instalador.

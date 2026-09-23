@@ -1,0 +1,28 @@
+{
+  "milestones": [
+    {
+      "titulo": "M1 utilitários de texto",
+      "criterio": "`node --test missao-teste/*.test.js` passa e cobre slugify e truncar, incluindo casos de borda",
+      "features": [
+        {
+          "titulo": "F1 slugify",
+          "spec": "Criar missao-teste/slugify.js (CommonJS, sem dependências) exportando slugify(texto): minúsculas, remove acentos (NFD), troca qualquer sequência de caracteres não alfanuméricos por um hífen e remove hífens das pontas. Teste em missao-teste/slugify.test.js com node:test cobrindo acentos, espaços múltiplos, pontuação e string vazia. Pasta descartável; não tocar em nada fora de missao-teste/."
+        },
+        {
+          "titulo": "F2 truncar",
+          "spec": "Criar missao-teste/truncar.js (CommonJS, sem dependências) exportando truncar(texto, max): se o texto couber em max caracteres devolve igual; senão corta e termina com '…' de modo que o resultado tenha exatamente max caracteres; max < 1 lança RangeError. Teste em missao-teste/truncar.test.js com node:test. Pasta descartável; não tocar fora de missao-teste/."
+        }
+      ]
+    },
+    {
+      "titulo": "M2 linha de comando",
+      "criterio": "`node missao-teste/cli.js \"Olá Mundo\" 8` imprime o slug truncado e `node --test missao-teste/*.test.js` passa",
+      "features": [
+        {
+          "titulo": "F3 cli",
+          "spec": "Criar missao-teste/cli.js que lê texto e max de process.argv, aplica slugify e depois truncar e imprime o resultado; sem argumentos imprime uso em stderr e sai com código 1. Separe a lógica numa função exportada executar(argv) para testar. Teste em missao-teste/cli.test.js com node:test cobrindo caso feliz e ausência de argumentos. Pasta descartável; não tocar fora de missao-teste/."
+        }
+      ]
+    }
+  ]
+}

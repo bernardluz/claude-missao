@@ -1,0 +1,9 @@
+{
+  "regrasTestes": ".claude/rules/common/testing.md",
+  "regrasProjeto": ".claude/CLAUDE.md",
+  "revisor": "reviewer",
+  "revisoresPorPasta": [{ "prefixo": "services/", "agentType": "kotlin-reviewer" }],
+  "leitor": "explorer",
+  "proibicoesExtras": ["variáveis BRIVAE_SKIP_*"],
+  "exemplosSkills": "migration + entidade, endpoint com teste de integração, tela Flutter"
+}

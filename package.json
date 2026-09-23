@@ -1,0 +1,12 @@
+{
+  "name": "claude-missao",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workflow do Claude Code que executa planos grandes em milestones, no estilo Factory Missions",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test teste/*.test.mjs",
+    "instalar": "node instalar.mjs"
+  }
+}
