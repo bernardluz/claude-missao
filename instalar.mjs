@@ -1,6 +1,7 @@
 // Instala o workflow missao num projeto.
 // Lê <projeto>/.claude/missao.config.json (opcional) e gera <projeto>/.claude/workflows/missao.js
-// com a configuração embutida em CONFIG_PROJETO.
+// com a configuração embutida em CONFIG_PROJETO. Copia também a skill missao-traycer para
+// <projeto>/.claude/skills/missao-traycer/SKILL.md; ela lê a configuração do projeto ao rodar.
 //
 // Uso:
 //   node instalar.mjs <caminho-do-projeto>              gera ou atualiza a cópia instalada
@@ -13,6 +14,8 @@ import { execFileSync } from 'node:child_process'
 
 const aqui = dirname(fileURLToPath(import.meta.url))
 export const NUCLEO = join(aqui, 'missao.js')
+export const SKILL = join(aqui, 'skills', 'missao-traycer', 'SKILL.md')
+const MARCA_SKILL = 'Instalada pelo `claude-missao`'
 const BLOCO = /\/\/ @config-inicio[^\n]*\nconst CONFIG_PROJETO = [\s\S]*?\n\/\/ @config-fim/
 const MARCA = 'gerado por claude-missao'
 const lf = texto => texto.replace(/\r\n/g, '\n')
@@ -66,18 +69,26 @@ export function instalar(projeto, { verificar = false, forcar = false } = {}) {
   const config = existsSync(arquivoConfig) ? JSON.parse(readFileSync(arquivoConfig, 'utf8')) : {}
   const gerado = gerar(readFileSync(NUCLEO, 'utf8'), config, origemAtual())
   const destino = join(raiz, '.claude', 'workflows', 'missao.js')
+  const skill = lf(readFileSync(SKILL, 'utf8'))
+  const destinoSkill = join(raiz, '.claude', 'skills', 'missao-traycer', 'SKILL.md')
 
   if (verificar) {
     const atual = existsSync(destino) ? readFileSync(destino, 'utf8') : null
-    return { destino, atualizado: atual !== null && semOrigem(atual) === semOrigem(gerado) }
+    const skillAtual = existsSync(destinoSkill) ? lf(readFileSync(destinoSkill, 'utf8')) : null
+    return { destino, destinoSkill, atualizado: atual !== null && semOrigem(atual) === semOrigem(gerado) && skillAtual === skill }
   }
-  // Não sobrescreve um missao.js mantido à mão: só o que este instalador gerou, salvo --forcar.
+  // Não sobrescreve arquivo mantido à mão: só o que este instalador gerou, salvo --forcar.
   if (!forcar && existsSync(destino) && !readFileSync(destino, 'utf8').includes(MARCA)) {
     throw new Error(`${destino} não foi gerado pelo instalador; revise e use --forcar para substituí-lo`)
   }
+  if (!forcar && existsSync(destinoSkill) && !readFileSync(destinoSkill, 'utf8').includes(MARCA_SKILL)) {
+    throw new Error(`${destinoSkill} não foi gerado pelo instalador; revise e use --forcar para substituí-lo`)
+  }
   mkdirSync(dirname(destino), { recursive: true })
   writeFileSync(destino, gerado)
-  return { destino, config: existsSync(arquivoConfig) ? arquivoConfig : null }
+  mkdirSync(dirname(destinoSkill), { recursive: true })
+  writeFileSync(destinoSkill, skill)
+  return { destino, destinoSkill, config: existsSync(arquivoConfig) ? arquivoConfig : null }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -89,11 +100,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     if (opcoes.includes('--verificar')) {
       const r = instalar(projeto, { verificar: true })
-      console.log(r.atualizado ? `atualizado: ${r.destino}` : `desatualizado ou ausente: ${r.destino}`)
+      console.log(r.atualizado ? `atualizado: ${r.destino} e ${r.destinoSkill}` : `desatualizado ou ausente: ${r.destino} ou ${r.destinoSkill}`)
       process.exit(r.atualizado ? 0 : 1)
     }
     const r = instalar(projeto, { forcar: opcoes.includes('--forcar') })
-    console.log(`instalado: ${r.destino}${r.config ? ` (configuração: ${r.config})` : ' (sem configuração do projeto; usando o padrão)'}`)
+    console.log(`instalado: ${r.destino} e ${r.destinoSkill}${r.config ? ` (configuração: ${r.config})` : ' (sem configuração do projeto; usando o padrão)'}`)
   } catch (erro) {
     console.error(`erro: ${erro.message}`)
     process.exit(1)

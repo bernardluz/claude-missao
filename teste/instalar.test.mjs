@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { gerar, instalar, chavesAceitas, NUCLEO } from '../instalar.mjs'
+import { join, dirname } from 'node:path'
+import { gerar, instalar, chavesAceitas, NUCLEO, SKILL } from '../instalar.mjs'
 import { executar, plano } from './simulador.mjs'
 
 const nucleo = readFileSync(NUCLEO, 'utf8')
@@ -77,6 +77,28 @@ test('não sobrescreve missao.js mantido à mão, salvo --forcar', () => {
   instalar(raiz, { forcar: true })
   assert.match(readFileSync(destino, 'utf8'), /gerado por claude-missao/)
   instalar(raiz)
+})
+
+test('instala a skill missao-traycer e a verificação acusa cópia editada', () => {
+  const raiz = projetoTemporario()
+  const { destinoSkill } = instalar(raiz)
+  assert.equal(readFileSync(destinoSkill, 'utf8'), readFileSync(SKILL, 'utf8').replace(/\r\n/g, '\n'))
+  assert.match(readFileSync(destinoSkill, 'utf8'), /^---\nname: missao-traycer\n/)
+  writeFileSync(destinoSkill, readFileSync(destinoSkill, 'utf8') + '\neditada\n')
+  assert.equal(instalar(raiz, { verificar: true }).atualizado, false)
+  instalar(raiz)
+  assert.equal(instalar(raiz, { verificar: true }).atualizado, true)
+})
+
+test('não sobrescreve skill mantida à mão, salvo --forcar', () => {
+  const raiz = projetoTemporario()
+  const destinoSkill = join(raiz, '.claude', 'skills', 'missao-traycer', 'SKILL.md')
+  mkdirSync(dirname(destinoSkill), { recursive: true })
+  writeFileSync(destinoSkill, 'manual\n')
+  assert.throws(() => instalar(raiz), /não foi gerado pelo instalador/)
+  assert.equal(readFileSync(destinoSkill, 'utf8'), 'manual\n')
+  instalar(raiz, { forcar: true })
+  assert.match(readFileSync(destinoSkill, 'utf8'), /name: missao-traycer/)
 })
 
 test('sem configuração no projeto, instala o padrão', () => {

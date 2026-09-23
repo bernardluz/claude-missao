@@ -113,6 +113,23 @@ retentativas. A suíte final pode levar muito tempo, conforme o projeto.
 
 O título `Suíte final` é reservado. Se a missão parar na suíte final, a retomada volta direto para ela.
 
+## No Traycer: skill `missao-traycer`
+
+O instalador também grava `.claude/skills/missao-traycer/SKILL.md` no projeto. A skill segue o mesmo
+fluxo e as mesmas garantias, mas usa agentes e artefatos do Traycer em vez do Workflow:
+
+| Workflow `missao` | Skill `missao-traycer` |
+|---|---|
+| Plano em `args` | Plano do usuário, de um artefato do epic ou em `args` |
+| Progresso no painel | Milestones viram `story`, features e correções viram `ticket` com status, e apontamentos viram `review` |
+| Configuração embutida na instalação | Lê `.claude/missao.config.json` ao rodar |
+| Revisor novo a cada rodada | O **mesmo** revisor e o **mesmo** implementador por feature, continuando a conversa |
+| Agente de commit | O coordenador commita os arquivos revisados e confere o commit |
+| Objeto `retomar` | Spec `estado/` da missão no epic |
+
+Para rodar, peça a um agente do Traycer para usar a skill `missao-traycer` com o plano. Ela depende do
+agente seguir o texto, então não tem os testes com agentes falsos que o Workflow tem.
+
 ## Acompanhar
 
 ```bash
