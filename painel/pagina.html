@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel das missões</title>
+<style>
+:root {
+  --fundo: #f6f7f9; --cartao: #ffffff; --texto: #1c2230; --suave: #5d6677; --linha: #e3e6ec;
+  --azul: #2f6fed; --verde: #1f9d57; --amarelo: #c98a04; --vermelho: #d14343; --cinza: #9aa3b2;
+  --azul-f: #e8f0fe; --verde-f: #e6f6ed; --amarelo-f: #fdf4dc; --vermelho-f: #fdeaea; --cinza-f: #eef0f4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #0f1218; --cartao: #171b23; --texto: #e6e9ef; --suave: #9aa3b2; --linha: #262c38;
+    --azul: #6b9bff; --verde: #3ecf85; --amarelo: #f0b94a; --vermelho: #ff7676; --cinza: #6c7486;
+    --azul-f: #1b2640; --verde-f: #14291f; --amarelo-f: #2f2712; --vermelho-f: #331a1c; --cinza-f: #1f242e;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--fundo); color: var(--texto); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--linha); background: var(--cartao); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 16px; margin: 0; }
+header .atualizado { margin-left: auto; color: var(--suave); font-size: 12px; }
+.pulso { width: 8px; height: 8px; border-radius: 50%; background: var(--verde); display: inline-block; }
+main { display: grid; grid-template-columns: 300px 1fr; gap: 16px; padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+.lista { display: flex; flex-direction: column; gap: 8px; }
+.item { background: var(--cartao); border: 1px solid var(--linha); border-radius: 10px; padding: 10px 12px; cursor: pointer; text-align: left; color: inherit; font: inherit; width: 100%; }
+.item.ativo { border-color: var(--azul); box-shadow: 0 0 0 1px var(--azul); }
+.item .topo { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.item .nome { font-weight: 600; }
+.item .sub { color: var(--suave); font-size: 12px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barra { height: 6px; background: var(--cinza-f); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+.barra > div { height: 100%; background: var(--verde); }
+.selo { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.s-rodando, .s-validando, .s-corrigindo { background: var(--azul-f); color: var(--azul); }
+.s-concluida, .s-validado, .s-feita, .s-aprovado, .s-ok { background: var(--verde-f); color: var(--verde); }
+.s-parada, .s-parou, .s-reprovado, .s-interrompido, .s-caiu { background: var(--vermelho-f); color: var(--vermelho); }
+.s-pendente { background: var(--cinza-f); color: var(--suave); }
+.cartao { background: var(--cartao); border: 1px solid var(--linha); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+.cab { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.cab h2 { margin: 0; font-size: 18px; }
+.metricas { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 14px; }
+.metrica { background: var(--fundo); border-radius: 8px; padding: 8px 10px; }
+.metrica .v { font-size: 16px; font-weight: 650; }
+.metrica .r { color: var(--suave); font-size: 12px; }
+.agora { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--azul-f); color: var(--texto); }
+.agora.parada { background: var(--vermelho-f); }
+details.ms { border: 1px solid var(--linha); border-radius: 10px; margin-bottom: 8px; background: var(--cartao); }
+details.ms > summary { list-style: none; cursor: pointer; padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
+details.ms > summary::-webkit-details-marker { display: none; }
+.icone { width: 20px; text-align: center; flex: none; }
+.ms-titulo { font-weight: 600; flex: 1; min-width: 0; }
+.conta { color: var(--suave); font-size: 12px; white-space: nowrap; }
+.feats { border-top: 1px solid var(--linha); padding: 4px 0; }
+.feat { border-bottom: 1px dashed var(--linha); }
+.feat:last-child { border-bottom: 0; }
+.feat > summary { list-style: none; cursor: pointer; display: flex; gap: 10px; align-items: center; padding: 7px 12px 7px 16px; }
+.feat > summary::-webkit-details-marker { display: none; }
+.feat .t { flex: 1; min-width: 0; }
+.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; }
+.corpo { padding: 4px 16px 12px 46px; color: var(--suave); font-size: 13px; }
+.corpo pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0; font: inherit; color: var(--texto); }
+.problema { border-left: 3px solid var(--amarelo); padding: 4px 8px; margin: 6px 0; background: var(--amarelo-f); color: var(--texto); border-radius: 0 6px 6px 0; white-space: pre-wrap; word-break: break-word; }
+.validacoes { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 10px 42px; border-top: 1px solid var(--linha); }
+h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--suave); margin: 0 0 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--linha); vertical-align: top; }
+td.n { white-space: nowrap; color: var(--suave); }
+.vazio { color: var(--suave); padding: 40px; text-align: center; }
+.girando { display: inline-block; animation: gira 1.2s linear infinite; }
+@keyframes gira { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <span class="pulso" id="pulso"></span>
+  <h1>Painel das missões</h1>
+  <span class="atualizado" id="atualizado">carregando…</span>
+</header>
+<main>
+  <nav class="lista" id="lista" aria-label="Missões"></nav>
+  <section id="detalhe"><div class="vazio">Nenhuma missão encontrada ainda.</div></section>
+</main>
+<script>
+const $ = s => document.querySelector(s)
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const NOMES = { rodando: 'rodando', concluida: 'concluída', parada: 'parada', validado: 'validado', validando: 'validando', corrigindo: 'corrigindo', pendente: 'pendente', parou: 'parou', feita: 'feita', aprovado: 'aprovado', reprovado: 'reprovado', interrompido: 'interrompido', caiu: 'caiu', ok: 'ok' }
+const ICONES = { feita: '✅', validado: '✅', rodando: '<span class="girando">⟳</span>', validando: '<span class="girando">⟳</span>', corrigindo: '🛠️', parou: '⛔', pendente: '○' }
+const selo = e => `<span class="selo s-${esc(e)}">${esc(NOMES[e] ?? e)}</span>`
+const tempo = ms => { if (!ms || ms < 0) return '—'; const m = Math.round(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min` }
+const quando = t => { if (!t) return '—'; const d = typeof t === 'number' ? new Date(t) : new Date(t); return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+const ha = t => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `há ${s} s` : s < 3600 ? `há ${Math.round(s / 60)} min` : `há ${Math.round(s / 3600)} h` }
+const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0)
+const tokens = v => { const n = num(v); return n >= 1e6 ? `${(n / 1e6).toFixed(1)} M` : n >= 1e3 ? `${Math.round(n / 1e3)} k` : String(n) }
+
+let selecionada = location.hash.slice(1) || null
+const abertos = new Set(JSON.parse(sessionStorage.getItem('abertos') ?? '[]'))
+const lembrar = () => { try { sessionStorage.setItem('abertos', JSON.stringify([...abertos])) } catch {} }
+document.addEventListener('toggle', e => {
+  const id = e.target.dataset?.id
+  if (!id) return
+  e.target.open ? abertos.add(id) : abertos.delete(id)
+  lembrar()
+}, true)
+
+function renderLista(ms) {
+  $('#lista').innerHTML = ms.map(m => {
+    const pct = m.progresso.total ? Math.round(100 * m.progresso.feitas / m.progresso.total) : 0
+    return `<button class="item ${m.id === selecionada ? 'ativo' : ''}" data-missao="${m.id}">
+      <div class="topo"><span class="nome">${esc(m.projeto)}</span>${selo(m.estado)}</div>
+      <div class="sub">${esc(m.milestoneAtual ?? m.milestones.at(-2)?.titulo ?? '')}</div>
+      <div class="sub">${num(m.progresso.feitas)}/${num(m.progresso.total)} features · início ${quando(m.inicio)}</div>
+      <div class="barra"><div style="width:${pct}%"></div></div>
+    </button>`
+  }).join('') || '<div class="vazio">Nenhuma missão.</div>'
+  for (const b of document.querySelectorAll('[data-missao]')) b.onclick = () => { selecionada = b.dataset.missao; location.hash = selecionada; atualizar() }
+}
+
+function renderFeature(f, prefixo) {
+  const id = `${prefixo}:${f.execucao ?? ""}:${f.titulo}`
+  const direita = f.estado === 'feita' ? (f.commit ? `<span class="mono">${esc(f.commit.slice(0, 9))}</span>` : '<span class="conta">sem commit registrado</span>')
+    : f.etapa ? `<span class="selo s-rodando">${esc(f.etapa)}</span>` : ''
+  const ajustes = [
+    num(f.rodadasAjuste) ? `<span class="conta">${num(f.rodadasAjuste)} ajuste${num(f.rodadasAjuste) > 1 ? 's' : ''}</span>` : '',
+    num(f.quedas) ? `<span class="conta">${num(f.quedas)} queda(s) do agente</span>` : '',
+    f.execucao > 1 ? `<span class="conta">execução ${num(f.execucao)}</span>` : '',
+  ].join('')
+  const probs = f.revisao && !f.revisao.aprovado ? f.revisao.problemas : []
+  const corpo = [
+    f.resumo ? `<div><b>Resumo do agente</b><pre>${esc(f.resumo)}</pre></div>` : '',
+    probs.length ? `<div><b>Última revisão: ${probs.length} apontamento(s)</b>${probs.map(p => `<div class="problema">${esc(p.problema ?? JSON.stringify(p))}</div>`).join('')}</div>` : '',
+    f.revisao?.aprovado ? '<div>Revisão independente: aprovada.</div>' : '',
+    f.motivoCommit && f.estado !== 'feita' ? `<div><b>Commit recusado</b><pre>${esc(f.motivoCommit)}</pre></div>` : '',
+    f.semCommitRegistrado ? '<div>Concluída sem commit registrado pela missão (commit manual ou já resolvida); o milestone foi validado.</div>' : '',
+    f.agentes ? `<div>${num(f.agentes)} agentes · ${tempo(f.duracaoMs)} · ${tokens(f.tokens)} tokens</div>` : '<div>Ainda não começou.</div>',
+  ].join('')
+  return `<details class="feat" data-id="${esc(id)}" ${abertos.has(id) ? 'open' : ''}>
+    <summary><span class="icone">${ICONES[f.estado] ?? '○'}</span><span class="t">${esc(f.titulo)}</span>${ajustes}${direita}</summary>
+    <div class="corpo">${corpo}</div></details>`
+}
+
+function renderDetalhe(m) {
+  const pct = m.progresso.total ? Math.round(100 * m.progresso.feitas / m.progresso.total) : 0
+  const duracao = (m.estado === 'rodando' ? Date.now() : m.ultimaAtividade) - Date.parse(m.inicio)
+  const agora = m.estado === 'rodando'
+    ? `<div class="agora"><b>Agora:</b> ${esc(m.atual ?? 'entre etapas')}</div>`
+    : m.estado === 'parada'
+      ? `<div class="agora parada"><b>Parada.</b> Último evento: ${esc(m.ultimoEvento?.label ?? '')}${m.ultimoEvento?.resumo ? ` — ${esc(m.ultimoEvento.resumo)}` : ''}. Sem atividade ${ha(m.ultimaAtividade)}.</div>`
+      : '<div class="agora"><b>Missão concluída.</b></div>'
+  const milestones = m.milestones.map((ms, i) => {
+    const id = `ms:${ms.titulo}`
+    const feitas = ms.features.filter(f => f.estado === 'feita').length
+    const aberto = abertos.has(id) || (!abertos.has(`fechado:${id}`) && ['rodando', 'validando', 'corrigindo', 'parou'].includes(ms.estado))
+    const valid = ms.validacoes.length ? `<div class="validacoes"><span class="conta">validação:</span>${ms.validacoes.slice(-4).map(v => `<span class="selo s-${esc(v.estado)}">${esc(v.label.split(':')[0])} · ${esc(NOMES[v.estado] ?? v.estado)}</span>`).join('')}</div>` : ''
+    const probs = ms.problemasValidacao?.length ? `<div class="corpo"><b>Problemas da validação</b>${ms.problemasValidacao.map(p => `<div class="problema">${esc(p.problema ?? '')}</div>`).join('')}</div>` : ''
+    const correcoes = ms.correcoes.length ? `<div class="feats"><div class="corpo" style="padding-top:8px"><b>Correções</b></div>${ms.correcoes.map(f => renderFeature(f, `c${i}`)).join('')}</div>` : ''
+    return `<details class="ms" data-id="${esc(id)}" ${aberto ? 'open' : ''}>
+      <summary><span class="icone">${ICONES[ms.estado] ?? '○'}</span><span class="ms-titulo">${esc(ms.titulo)}</span>
+        ${num(ms.rodadasCorrecao) ? `<span class="conta">${num(ms.rodadasCorrecao)} rodada(s) de correção</span>` : ''}
+        ${ms.features.length ? `<span class="conta">${feitas}/${ms.features.length}</span>` : ''}${selo(ms.estado)}</summary>
+      ${ms.features.length ? `<div class="feats">${ms.features.map(f => renderFeature(f, `f${i}`)).join('')}</div>` : ''}
+      ${correcoes}${valid}${probs}</details>`
+  }).join('')
+  const commits = m.commits?.length ? `<table>${m.commits.map(c => `<tr><td class="n mono">${esc(c.sha)}</td><td>${esc(c.assunto)}</td><td class="n">${quando(c.data)}</td></tr>`).join('')}</table>` : '<div class="conta">Nenhum commit ainda.</div>'
+  const tl = `<table>${m.linhaDoTempo.map(c => `<tr><td class="n">${quando(c.inicio)}</td><td>${esc(c.label)}${c.resumo ? `<div class="conta">${esc(c.resumo)}</div>` : ''}</td><td class="n">${tempo(c.duracaoMs)}</td><td>${selo(c.estado)}</td></tr>`).join('')}</table>`
+  const skills = m.skills.map(s => `<details class="feat" data-id="sk:${esc(s.nome)}" ${abertos.has(`sk:${s.nome}`) ? 'open' : ''}><summary><span class="t">${esc(s.nome)}</span><span class="conta">${s.features.length} features</span></summary><div class="corpo"><pre>${esc(s.guia)}</pre></div></details>`).join('')
+  $('#detalhe').innerHTML = `
+    <div class="cartao">
+      <div class="cab"><h2>${esc(m.projeto)}</h2>${selo(m.estado)}<span class="conta mono">${esc(m.branch ?? '')} · base ${esc((m.base ?? '').slice(0, 9))}</span></div>
+      <div class="barra" style="height:10px"><div style="width:${pct}%"></div></div>
+      <div class="metricas">
+        <div class="metrica"><div class="v">${num(m.progresso.feitas)}/${num(m.progresso.total)}</div><div class="r">features feitas</div></div>
+        <div class="metrica"><div class="v">${tempo(duracao)}</div><div class="r">desde ${quando(m.inicio)}</div></div>
+        <div class="metrica"><div class="v">${num(m.agentes)}</div><div class="r">agentes em ${m.execucoes.length} execução(ões)</div></div>
+        <div class="metrica"><div class="v">${tokens(m.tokensSaida)}</div><div class="r">tokens gerados (${tokens(m.tokens)} processados)</div></div>
+        <div class="metrica"><div class="v">${ha(m.ultimaAtividade)}</div><div class="r">última atividade</div></div>
+      </div>
+      ${agora}
+    </div>
+    <div class="cartao"><h3>Milestones</h3>${milestones}</div>
+    <div class="cartao"><details data-id="commits" ${abertos.has('commits') ? 'open' : ''}><summary><h3 style="display:inline">Commits (${m.commits?.length ?? 0})</h3></summary>${commits}</details></div>
+    <div class="cartao"><details data-id="tl" ${abertos.has('tl') ? 'open' : ''}><summary><h3 style="display:inline">Últimos agentes</h3></summary>${tl}</details></div>
+    <div class="cartao"><details data-id="skills" ${abertos.has('skills') ? 'open' : ''}><summary><h3 style="display:inline">Skills da missão (${m.skills.length})</h3></summary>${skills}</details></div>`
+  for (const d of document.querySelectorAll('details.ms')) d.addEventListener('toggle', () => { if (!d.open) abertos.add(`fechado:${d.dataset.id}`); else abertos.delete(`fechado:${d.dataset.id}`); lembrar() })
+}
+
+async function atualizar() {
+  try {
+    const ms = await (await fetch('/api/missoes')).json()
+    if (!selecionada || !ms.some(m => m.id === selecionada)) selecionada = (ms.find(m => m.estado === 'rodando') ?? ms[0])?.id ?? null
+    renderLista(ms)
+    if (selecionada) {
+      const y = window.scrollY
+      renderDetalhe(await (await fetch(`/api/missoes/${selecionada}`)).json())
+      window.scrollTo(0, y)
+    }
+    $('#atualizado').textContent = `atualizado ${new Date().toLocaleTimeString('pt-BR')}`
+    $('#pulso').style.background = 'var(--verde)'
+  } catch {
+    $('#atualizado').textContent = 'sem conexão com o servidor do painel'
+    $('#pulso').style.background = 'var(--vermelho)'
+  }
+}
+atualizar()
+setInterval(atualizar, 5000)
+</script>
+</body>
+</html>

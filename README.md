@@ -113,6 +113,41 @@ retentativas. A suíte final pode levar muito tempo, conforme o projeto.
 
 O título `Suíte final` é reservado. Se a missão parar na suíte final, a retomada volta direto para ela.
 
+## Acompanhar
+
+```bash
+npm run painel
+```
+
+Abra http://127.0.0.1:4610. A porta pode ser trocada em `PAINEL_PORTA`.
+
+O painel acha sozinho as missões de todos os projetos. Uma missão nova aparece sem configuração
+nenhuma. A página mostra:
+- a árvore de milestones e features, com o estado de cada uma;
+- a etapa atual, as rodadas de ajuste e os apontamentos da revisão;
+- as correções de cada milestone e os commits;
+- os últimos agentes e as skills.
+
+Ela se atualiza a cada 5 segundos.
+
+De onde vem cada informação, só por leitura:
+- **Registros do Claude Code:** `~/.claude/projects/*/*/subagents/workflows/wf_*/`, ou `CLAUDE_CONFIG_DIR`.
+  O `journal.jsonl` tem os agentes em ordem, com os resultados. Cada `agent-*.jsonl` tem o prompt,
+  os horários e os tokens. O plano sai do prompt do agente `skills da missão`.
+- **Repositório:** o `git log` da própria missão.
+
+O servidor só escuta em 127.0.0.1 e recusa requisições cujo Host não seja `127.0.0.1` ou
+`localhost`. Algumas regras de leitura:
+- **Retomada:** a execução retomada entra na mesma missão da que parou, porque as duas têm o mesmo
+  repositório e o mesmo último milestone. Uma retomada que começa direto na suíte final entra na
+  missão aberta mais recente do repositório.
+- **Recomeço:** um plano que recomeça num milestone já validado, ou que roda depois de uma missão
+  concluída, vira outra missão.
+- **Parada:** a execução conta como parada em dois casos:
+  - com agente rodando, depois de 20 minutos sem nenhum arquivo novo, porque uma chamada de
+    ferramenta longa não escreve nada;
+  - sem agente rodando, depois de 3 minutos, porque a missão lança o próximo agente na hora.
+
 ## Limitações
 
 - **Workers não lançam subagentes.** No Workflow, os agentes não têm a ferramenta `Agent`, nem com
