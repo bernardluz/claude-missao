@@ -136,6 +136,19 @@ De onde vem cada informação, só por leitura:
   os horários e os tokens. O plano sai do prompt do agente `skills da missão`.
 - **Repositório:** o `git log` da própria missão.
 
+**Limites da assinatura.** O topo da página mostra o uso da janela de 5 horas e o semanal, com o horário
+em que cada um zera. Os dados vêm da statusline do Claude Code: `painel/statusline.mjs` lê o JSON que
+o Claude Code manda para a statusline e grava `rate_limits` em `~/.claude/missao-painel/limites.json`.
+Para ativar, ponha isto em `~/.claude/settings.json`:
+
+```json
+"statusLine": { "type": "command", "command": "node \"<caminho>/claude-missao/painel/statusline.mjs\"", "padding": 0 }
+```
+
+A statusline só roda com uma sessão do Claude Code aberta no terminal (o app desktop não a usa).
+Sem sessão aberta, a página mostra há quanto tempo foi a última leitura. O limite semanal por
+modelo e o uso extra não fazem parte do JSON da statusline, por isso não aparecem.
+
 O servidor só escuta em 127.0.0.1 e recusa requisições cujo Host não seja `127.0.0.1` ou
 `localhost`. Algumas regras de leitura:
 - **Retomada:** a execução retomada entra na mesma missão da que parou, porque as duas têm o mesmo

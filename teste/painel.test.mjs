@@ -289,3 +289,61 @@ test('servidor: recusa Host estranho e método que não é GET, e serve a lista'
     await new Promise(r => outro.close(r))
   }
 })
+
+test('statusline grava os limites da assinatura e imprime a linha', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const { readFileSync, existsSync } = await import('node:fs')
+  const raiz = temp()
+  const entrada = {
+    model: { display_name: 'Opus 5.5' },
+    rate_limits: { five_hour: { used_percentage: 19.4, resets_at: 1790000000 }, seven_day: { used_percentage: 66, resets_at: 1790400000 } },
+  }
+  const r = spawnSync(process.execPath, ['painel/statusline.mjs'], { input: JSON.stringify(entrada), env: { ...process.env, CLAUDE_CONFIG_DIR: raiz }, encoding: 'utf8' })
+  assert.equal(r.status, 0)
+  assert.equal(r.stdout, 'Opus 5.5 · 5h 19% · semana 66%')
+  const gravado = JSON.parse(readFileSync(join(raiz, 'missao-painel', 'limites.json'), 'utf8'))
+  assert.deepEqual(gravado.cincoHoras, { usado: 19.4, zeraEm: 1790000000000 })
+  assert.equal(gravado.semanal.usado, 66)
+  assert.ok(gravado.lidoEm > 0)
+
+  // Sem rate_limits (ex.: antes da primeira resposta) não apaga a leitura anterior; entrada inválida não quebra.
+  const sem = spawnSync(process.execPath, ['painel/statusline.mjs'], { input: JSON.stringify({ model: { display_name: 'Opus 5.5' } }), env: { ...process.env, CLAUDE_CONFIG_DIR: raiz }, encoding: 'utf8' })
+  assert.equal(sem.stdout, 'Opus 5.5')
+  assert.equal(JSON.parse(readFileSync(join(raiz, 'missao-painel', 'limites.json'), 'utf8')).semanal.usado, 66)
+  const lixo = spawnSync(process.execPath, ['painel/statusline.mjs'], { input: 'não é json', env: { ...process.env, CLAUDE_CONFIG_DIR: raiz }, encoding: 'utf8' })
+  assert.equal(lixo.status, 0)
+  assert.ok(existsSync(join(raiz, 'missao-painel', 'limites.json')))
+})
+
+test('servidor: /api/limites devolve a última leitura ou null', async () => {
+  const { gravarLimites, arquivoLimites } = await import('../painel/statusline.mjs')
+  const raiz = temp()
+  const servidor = criarServidor({ raiz, porta: 0 })
+  await new Promise(r => servidor.listen(0, '127.0.0.1', r))
+  const porta = servidor.address().port
+  await new Promise(r => servidor.close(r))
+  const s = criarServidor({ raiz, porta })
+  await new Promise(r => s.listen(porta, '127.0.0.1', r))
+  try {
+    const url = `http://127.0.0.1:${porta}/api/limites`
+    assert.deepEqual(await (await fetch(url)).json(), { limites: null })
+    gravarLimites({ cincoHoras: { usado: 10, zeraEm: 1 }, semanal: null }, arquivoLimites(raiz), 123)
+    assert.deepEqual(await (await fetch(url)).json(), { limites: { cincoHoras: { usado: 10, zeraEm: 1 }, semanal: null, lidoEm: 123 } })
+  } finally {
+    await new Promise(r => s.close(r))
+  }
+})
+
+test('limites: sessões em paralelo não baixam o uso da mesma janela e valor nulo é descartado', async () => {
+  const { mesclarLimites, extrairLimites } = await import('../painel/statusline.mjs')
+  const agora = 1000
+  const anterior = { cincoHoras: { usado: 40, zeraEm: 5000 }, semanal: { usado: 70, zeraEm: 9000 } }
+  // Sessão parada grava valor antigo da mesma janela: fica o maior.
+  assert.deepEqual(mesclarLimites(anterior, { cincoHoras: { usado: 30, zeraEm: 5000 }, semanal: null }, agora),
+    { cincoHoras: { usado: 40, zeraEm: 5000 }, semanal: { usado: 70, zeraEm: 9000 } })
+  // Janela nova (outro reset) substitui; janela ausente que já zerou some.
+  assert.deepEqual(mesclarLimites(anterior, { cincoHoras: { usado: 2, zeraEm: 8000 }, semanal: null }, 9500),
+    { cincoHoras: { usado: 2, zeraEm: 8000 }, semanal: null })
+  assert.equal(extrairLimites({ rate_limits: { five_hour: { used_percentage: null, resets_at: 1 } } }), null)
+  assert.equal(extrairLimites({ rate_limits: { five_hour: { used_percentage: '', resets_at: 1 } } }), null)
+})

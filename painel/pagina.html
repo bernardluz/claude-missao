@@ -69,6 +69,14 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 td { padding: 6px 8px; border-bottom: 1px solid var(--linha); vertical-align: top; }
 td.n { white-space: nowrap; color: var(--suave); }
 .vazio { color: var(--suave); padding: 40px; text-align: center; }
+.limites { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--suave); }
+.limite { display: flex; align-items: center; gap: 6px; }
+.limite b { color: var(--texto); font-weight: 600; }
+.mini { width: 90px; height: 6px; background: var(--cinza-f); border-radius: 4px; overflow: hidden; }
+.mini > div { height: 100%; background: var(--verde); }
+.mini.alerta > div { background: var(--amarelo); }
+.mini.critico > div { background: var(--vermelho); }
+@media (max-width: 860px) { header { flex-wrap: wrap; } .limites { order: 3; width: 100%; } }
 .girando { display: inline-block; animation: gira 1.2s linear infinite; }
 @keyframes gira { to { transform: rotate(360deg); } }
 </style>
@@ -77,6 +85,7 @@ td.n { white-space: nowrap; color: var(--suave); }
 <header>
   <span class="pulso" id="pulso"></span>
   <h1>Painel das missões</h1>
+  <div class="limites" id="limites" aria-label="Limites da assinatura"></div>
   <span class="atualizado" id="atualizado">carregando…</span>
 </header>
 <main>
@@ -186,7 +195,32 @@ function renderDetalhe(m) {
   for (const d of document.querySelectorAll('details.ms')) d.addEventListener('toggle', () => { if (!d.open) abertos.add(`fechado:${d.dataset.id}`); else abertos.delete(`fechado:${d.dataset.id}`); lembrar() })
 }
 
+// Limites da assinatura: vêm da statusline do Claude Code, que só roda com uma sessão aberta no terminal.
+const zera = ms => {
+  if (!ms) return ''
+  const d = new Date(ms)
+  const hoje = new Date().toDateString() === d.toDateString()
+  return hoje ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+}
+function renderLimites(l) {
+  if (!l) {
+    $('#limites').innerHTML = '<span>Limites: sem leitura ainda. Abra o Claude Code no terminal.</span>'
+    return
+  }
+  const barra = (nome, j) => {
+    if (!j) return ''
+    const usado = Math.max(0, Math.min(100, num(j.usado)))
+    const classe = usado >= 95 ? 'critico' : usado >= 80 ? 'alerta' : ''
+    return `<span class="limite" title="zera ${esc(zera(j.zeraEm))}">${esc(nome)} <span class="mini ${classe}"><div style="width:${usado}%"></div></span><b>${Math.round(usado)}%</b> <span>zera ${esc(zera(j.zeraEm))}</span></span>`
+  }
+  const velho = Date.now() - num(l.lidoEm) > 30 * 60 * 1000
+  $('#limites').innerHTML = barra('5h', l.cincoHoras) + barra('Semana', l.semanal) +
+    (velho ? `<span title="A statusline só atualiza com uma sessão do Claude Code aberta no terminal.">leitura ${esc(ha(num(l.lidoEm)))}</span>` : '')
+}
+
 async function atualizar() {
+  fetch('/api/limites').then(r => r.json()).then(d => renderLimites(d.limites)).catch(() => {})
   try {
     const ms = await (await fetch('/api/missoes')).json()
     if (!selecionada || !ms.some(m => m.id === selecionada)) selecionada = (ms.find(m => m.estado === 'rodando') ?? ms[0])?.id ?? null

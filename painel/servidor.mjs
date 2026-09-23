@@ -5,8 +5,19 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { missoes, commitsDaMissao, raizPadrao } from './leitor.mjs'
+import { arquivoLimites } from './statusline.mjs'
 
 const PAGINA = path.join(path.dirname(fileURLToPath(import.meta.url)), 'pagina.html')
+
+// Limites da assinatura gravados pela statusline (painel/statusline.mjs). null quando ainda não há leitura.
+function lerLimites(raiz) {
+  try {
+    const l = JSON.parse(fs.readFileSync(arquivoLimites(raiz), 'utf8'))
+    return l && typeof l === 'object' ? l : null
+  } catch {
+    return null
+  }
+}
 
 const resumo = m => {
   const { milestones, skills, linhaDoTempo, ...resto } = m
@@ -35,6 +46,7 @@ export function criarServidor({ raiz = raizPadrao(), porta }) {
       const url = new URL(req.url, 'http://localhost')
       if (url.pathname === '/') return responder(res, 200, fs.readFileSync(PAGINA, 'utf8'), 'text/html; charset=utf-8')
       if (url.pathname === '/api/missoes') return responder(res, 200, atuais().map(resumo))
+      if (url.pathname === '/api/limites') return responder(res, 200, { limites: lerLimites(raiz) })
       const detalhe = url.pathname.match(/^\/api\/missoes\/([0-9a-f]{12})$/)
       if (detalhe) {
         const m = atuais().find(x => x.id === detalhe[1])
