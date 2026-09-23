@@ -103,7 +103,8 @@ describe('suíte completa final', () => {
     const r = await rodar(plano())
     const ordem = r.chamadas.map(c => c.label)
     assert.ok(ordem.indexOf('suíte completa') > ordem.lastIndexOf('revisão: M2'))
-    assert.match(r.prompt('suíte completa'), /suíte completa de testes do projeto, com os runners já adotados/)
+    assert.match(r.prompt('suíte completa'), /do que a missão tocou e de quem depende disso/)
+    assert.match(r.prompt('suíte completa'), /git diff --name-only base0000\.\.HEAD/)
     assert.equal(r.resultado.relatorio.at(-1).milestone, 'Suíte final')
   })
 
@@ -121,8 +122,11 @@ describe('suíte completa final', () => {
     const p1 = await rodar(plano(), { suite: [2, 2] }, estado)
     assert.equal(p1.resultado.parouEm, 'Suíte final')
     assert.equal(p1.resultado.retomar.aPartirDe, 'Suíte final')
+    assert.equal(p1.resultado.retomar.inicioMissao, 'base0000')
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
     assert.equal(p2.resultado.concluido, true)
+    assert.match(p2.prompt('suíte completa'), /base0000\.\.HEAD/)
+    assert.equal(p2.resultado.base, 'base0000')
     assert.equal(p2.contar('F'), 0)
     assert.equal(p2.contar('revisão: M'), 0)
     assert.equal(p2.contar('suíte completa'), 1)
@@ -154,9 +158,14 @@ describe('suíte completa final', () => {
     assert.match(r.prompt('correção 1.1 (Suíte final)'), /não desative, pule nem enfraqueça testes/)
   })
 
+  test('substitui {inicio} na instrução configurada', async () => {
+    const r = await rodarCom({ suiteCompleta: 'gate --base {inicio}' }, plano())
+    assert.match(r.prompt('suíte completa'), /gate --base base0000\./)
+  })
+
   test('usa o comando configurado no projeto', async () => {
     const r = await rodarCom({ suiteCompleta: 'npm run verify' }, plano())
-    assert.match(r.prompt('suíte completa'), /Rode a suíte completa de testes do projeto: npm run verify\./)
+    assert.match(r.prompt('suíte completa'), /de quem depende disso: npm run verify\. Intervalo da missão: base0000\.\.HEAD\./)
   })
 
   test('título de milestone reservado é recusado', async () => {
@@ -233,6 +242,17 @@ describe('retomada', () => {
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
     assert.match(p2.resultado.motivo, /repositório mudou desde a parada/)
     assert.deepEqual(p2.resultado.retomar, p1.resultado.retomar)
+  })
+
+  test('retomada no meio preserva o início da missão para a suíte final', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { validacao: [0, 2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'M2')
+    assert.equal(p1.resultado.retomar.inicioMissao, 'base0000')
+    assert.notEqual(p1.resultado.retomar.base, 'base0000')
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.match(p2.prompt('suíte completa'), /base0000\.\.HEAD/)
   })
 
   test('recusa retomar inválido', async () => {

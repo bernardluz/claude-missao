@@ -19,7 +19,7 @@ Para cada milestone:
      ▼ sim
   próximo milestone
 
-Suíte final → a suíte completa do projeto roda uma vez; cada falha vira correção, no mesmo loop
+Suíte final → suíte completa do que a missão tocou e de quem depende disso; cada falha vira correção
 ```
 
 O loop de correção segue enquanto a validação aponta **menos** problemas que na rodada anterior.
@@ -79,7 +79,7 @@ Todas as chaves são opcionais. Sem configuração, o workflow usa o agente padr
 | `formatoCommit` | Formato da mensagem de commit | `` `<tipo>: <descrição>` `` |
 | `idioma` | Idioma da mensagem de commit | `pt-BR` |
 | `exemplosSkills` | Exemplos de tipos de trabalho para o agente das skills | genérico |
-| `suiteCompleta` | Como rodar a suíte completa ao fim da missão (comando ou instrução) | suíte completa com os runners do projeto |
+| `suiteCompleta` | Como rodar, ao fim, a suíte completa do que a missão tocou e de quem depende disso. `{inicio}` vira o commit onde a missão começou | o agente acha módulos tocados e dependentes pelo `git diff` |
 
 Os `agentType` precisam existir no projeto, em `.claude/agents/`. Prefira um `revisor` e um `leitor` que
 tenham só ferramentas de leitura. O agente padrão pode escrever e só obedece à instrução do prompt.

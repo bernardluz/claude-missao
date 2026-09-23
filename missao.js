@@ -19,7 +19,7 @@ export const meta = {
 //         maxRodadasRevisao?, maxFeaturesPorMilestone?, maxRetentativasInfra?, retomar?, config? }
 // Um commit atômico por feature, só depois de revisão independente aprovada; a validação do milestone revisa e
 // testa o conjunto e cria etapas de correção, em loop até aprovar ou parar de progredir. Depois do último milestone,
-// a suíte completa do projeto roda uma vez e entra no mesmo loop de correção.
+// a suíte completa do que a missão tocou, e de quem depende disso, roda uma vez e entra no mesmo loop de correção.
 // Correções seguem enquanto a validação aponta menos problemas que na rodada anterior; o teto só evita loop infinito.
 // Skills da missão vivem só nesta execução: vão no prompt dos workers e no retorno, nunca em .claude/skills/.
 // Milestones pequenos: validar cedo evita o acúmulo de erros de um milestone gigante validado só no fim.
@@ -47,7 +47,8 @@ const PADRAO = {
   idioma: 'pt-BR',
   // Exemplos de tipos de trabalho para o agente que monta as skills da missão.
   exemplosSkills: 'migration + entidade, endpoint com teste de integração, tela',
-  // Como rodar a suíte completa ao fim da missão (comando ou instrução). null: suíte completa com os runners do projeto.
+  // Como rodar, ao fim da missão, a suíte completa do que a missão tocou e de quem depende disso (comando ou
+  // instrução; {inicio} vira o commit onde a missão começou). null: o agente descobre módulos tocados e dependentes.
   suiteCompleta: null,
 }
 // @config-inicio (substituído por instalar.mjs)
@@ -206,8 +207,9 @@ const retomar = args.retomar ?? null
 const inicio = retomar ? etapas.findIndex(m => m.titulo === retomar.aPartirDe) : 0
 if (retomar && (inicio < 0 || typeof retomar.base !== 'string' || retomar.base.length < 7 ||
   typeof retomar.head !== 'string' || retomar.head.length < 7 || !Array.isArray(retomar.commits) ||
-  (retomar.concluidas !== undefined && !Array.isArray(retomar.concluidas)))) {
-  throw new Error('args.retomar inválido: use o objeto `retomar` devolvido pela execução que parou ({ aPartirDe, base, head, commits, concluidas })')
+  (retomar.concluidas !== undefined && !Array.isArray(retomar.concluidas)) ||
+  (retomar.inicioMissao !== undefined && (typeof retomar.inicioMissao !== 'string' || retomar.inicioMissao.length < 7)))) {
+  throw new Error('args.retomar inválido: use o objeto `retomar` devolvido pela execução que parou ({ aPartirDe, inicioMissao, base, head, commits, concluidas })')
 }
 const pendentes = etapas.slice(inicio)
 if (inicio > 0) log(`Retomando em "${retomar.aPartirDe}": ${inicio} etapas anteriores já entregues`)
@@ -253,6 +255,11 @@ if (!preparo || !preparo.limpo || !preparo.branch) {
 log(`Branch ${preparo.branch}, base ${preparo.head}`)
 
 let head = preparo.head
+// Início da missão inteira, preservado entre retomadas: define o que a suíte final cobre.
+const INICIO_MISSAO = retomar ? (retomar.inicioMissao ?? retomar.base) : preparo.head
+if (retomar && !retomar.inicioMissao) {
+  log(`retomar sem inicioMissao: a suíte final vai cobrir só a partir de ${retomar.base}, não a missão inteira`)
+}
 
 // Como a Factory: antes de começar, guias específicos por tipo de feature, montados a partir do código atual.
 phase('Skills')
@@ -468,14 +475,19 @@ async function validarSuite(anteriores) {
   const memoria = anteriores.length
     ? `\nNa rodada anterior falharam: ${anteriores.map(p => p.problema).join(' | ')}. Confirme se foram resolvidos.`
     : ''
+  const intervalo = `${INICIO_MISSAO}..HEAD`
   const como = CONFIG.suiteCompleta
-    ? `Rode a suíte completa de testes do projeto: ${CONFIG.suiteCompleta}.`
-    : 'Rode a suíte completa de testes do projeto, com os runners já adotados, em todos os módulos e áreas (não só testes focados).'
+    ? `Rode a suíte completa do que a missão tocou e de quem depende disso: ${CONFIG.suiteCompleta.replaceAll('{inicio}', INICIO_MISSAO)}. ` +
+      `Intervalo da missão: ${intervalo}.`
+    : `Rode a suíte completa do que a missão tocou e de quem depende disso. Veja o que mudou com \`git diff --name-only ${intervalo}\`, ` +
+      'identifique os módulos, pacotes ou apps tocados e os que dependem deles, e rode a suíte inteira de cada um ' +
+      '(não só testes focados), com os runners já adotados no projeto.'
   const r = await comRetentativa('suíte completa', () => agent(
     `${como} Faça isso no HEAD atual, sem alterar código. Guarde a saída completa em arquivo temporário FORA do repositório. ` +
     'Não rode comandos que alterem lockfiles ou dependências versionadas. Confira `git status` antes e depois: ao ' +
     'terminar, desfaça somente o que a própria suíte criou ou alterou (remova arquivos novos gerados por ela e use ' +
-    '`git restore -- <path>` nos que ela modificou), deixando a árvore como estava.\n' +
+    '`git restore -- <path>` nos que ela modificou), deixando a árvore como estava. Esses arquivos são seus, não ' +
+    'alheios: a proibição de restore abaixo não se aplica a eles.\n' +
     'Aprove só se tudo passar. Agrupe as falhas por causa provável: um problema por causa, não um por teste, com o ' +
     'arquivo provável e a saída relevante. Se a causa for de ambiente (serviço fora do ar, dependência ou ferramenta ' +
     'ausente, porta ocupada), marque ambiente=true e descreva o que faltou.' + memoria +
@@ -530,7 +542,7 @@ function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
     parouEm: m.titulo, ...extra, skills,
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, base, head, commits: [...commits], concluidas },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -626,4 +638,4 @@ for (const [i, m] of pendentes.entries()) {
   relatorio.push({ milestone: m.titulo, aprovado: true, rodadasCorrecao: rodada, commits: `${base}..${head}`, features: feitas })
 }
 
-return { concluido: true, branch: preparo.branch, base: preparo.head, head, skills, relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, skills, relatorio }
