@@ -16,6 +16,8 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   arquivosGit        o que o git lista no diff (padrão = arquivos)
 //   revisaoFeature     { [feature]: [n problemas por rodada] }
 //   validacao          [n problemas por rodada de validação do milestone] (lidos pelo revisor do milestone)
+//   suite              [n falhas por rodada da suíte completa final]
+//   suiteAmbiente      a suíte falha por ambiente
 //   gate               { [feature]: vezes que o gate falha }
 //   foraDaLista        { [feature]: vezes que o commit acusa mudança fora da lista }
 //   quedas             { [label]: vezes que o agente devolve null }
@@ -33,6 +35,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   const arquivos = o.arquivos ?? ['x/a.js']
   const arquivosGit = o.arquivosGit ?? arquivos
   let rodadaValidacao = 0
+  let rodadaSuite = 0
   const chamadas = []
   const logs = []
   const novoSha = () => `sha${String(estado.git.length).padStart(5, '0')}`
@@ -54,6 +57,11 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       const base = prompt.match(/rev-list --reverse (\w+)\.\.HEAD/)[1]
       const commits = estado.git.slice(estado.git.indexOf(base) + 1)
       return { branch: o.branchNaConferencia ?? 'develop', head: estado.git.at(-1), limpo: !estado.sujo, commits, arquivos: commits.length ? arquivosGit : [] }
+    }
+    if (l === 'suíte completa') {
+      if (o.suiteAmbiente) return { aprovado: false, problemas: [{ problema: 'Docker fora do ar', ambiente: true }] }
+      const n = (o.suite ?? [])[rodadaSuite++] ?? 0
+      return { aprovado: n === 0, problemas: problemas(n, 's') }
     }
     if (opt.phase === 'Validar') {
       if (l.startsWith('testes: ')) return { aprovado: true, problemas: [] }

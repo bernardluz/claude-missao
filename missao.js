@@ -8,6 +8,7 @@ export const meta = {
     { title: 'Implementar', detail: 'por feature, em série: implementa, revisão independente, commit' },
     { title: 'Validar', detail: 'confere commits, revisão + testes sobre o milestone' },
     { title: 'Corrigir', detail: 'um item por problema apontado, com revisão e commit próprios' },
+    { title: 'Suíte final', detail: 'suíte completa do projeto ao fim; falhas viram correções' },
   ],
 }
 
@@ -17,7 +18,8 @@ export const meta = {
 // args: { milestones: [{ titulo, criterio, features: [{ titulo, spec }] }], maxRodadasCorrecao?, maxProblemasPorRodada?,
 //         maxRodadasRevisao?, maxFeaturesPorMilestone?, maxRetentativasInfra?, retomar?, config? }
 // Um commit atômico por feature, só depois de revisão independente aprovada; a validação do milestone revisa e
-// testa o conjunto e cria etapas de correção, em loop até aprovar ou parar de progredir.
+// testa o conjunto e cria etapas de correção, em loop até aprovar ou parar de progredir. Depois do último milestone,
+// a suíte completa do projeto roda uma vez e entra no mesmo loop de correção.
 // Correções seguem enquanto a validação aponta menos problemas que na rodada anterior; o teto só evita loop infinito.
 // Skills da missão vivem só nesta execução: vão no prompt dos workers e no retorno, nunca em .claude/skills/.
 // Milestones pequenos: validar cedo evita o acúmulo de erros de um milestone gigante validado só no fim.
@@ -45,6 +47,8 @@ const PADRAO = {
   idioma: 'pt-BR',
   // Exemplos de tipos de trabalho para o agente que monta as skills da missão.
   exemplosSkills: 'migration + entidade, endpoint com teste de integração, tela',
+  // Como rodar a suíte completa ao fim da missão (comando ou instrução). null: suíte completa com os runners do projeto.
+  suiteCompleta: null,
 }
 // @config-inicio (substituído por instalar.mjs)
 const CONFIG_PROJETO = {}
@@ -61,7 +65,7 @@ const CONFIG = { ...PADRAO, ...CONFIG_PROJETO, ...(args?.config ?? {}) }
 {
   const texto = v => v === null || typeof v === 'string'
   const erros = Object.keys(CONFIG).filter(k => !(k in PADRAO)).map(k => `chave desconhecida: ${k}`)
-  for (const k of ['regrasTestes', 'regrasProjeto', 'revisor', 'leitor']) if (!texto(CONFIG[k])) erros.push(`${k} deve ser texto ou null`)
+  for (const k of ['regrasTestes', 'regrasProjeto', 'revisor', 'leitor', 'suiteCompleta']) if (!texto(CONFIG[k])) erros.push(`${k} deve ser texto ou null`)
   for (const k of ['formatoCommit', 'idioma', 'exemplosSkills']) if (typeof CONFIG[k] !== 'string') erros.push(`${k} deve ser texto`)
   if (!Array.isArray(CONFIG.revisoresPorPasta) || !CONFIG.revisoresPorPasta.every(r => r && typeof r.prefixo === 'string' && typeof r.agentType === 'string')) {
     erros.push('revisoresPorPasta deve ser lista de { prefixo, agentType }')
@@ -164,7 +168,7 @@ const VALIDACAO = {
       type: 'array',
       items: {
         type: 'object',
-        properties: { arquivo: { type: 'string' }, problema: { type: 'string' } },
+        properties: { arquivo: { type: 'string' }, problema: { type: 'string' }, ambiente: { type: 'boolean' } },
         required: ['problema'],
       },
     },
@@ -193,18 +197,25 @@ if (grandes.length) {
     `ajuste maxFeaturesPorMilestone): ${grandes.map(m => `${m.titulo} (${m.features.length})`).join(', ')}`)
 }
 
+// A suíte completa roda uma vez ao fim, como uma etapa sem features: falha vira correção no mesmo loop.
+const SUITE = { titulo: 'Suíte final', criterio: 'a suíte completa do projeto passa', features: [], suite: true }
+if (args.milestones.some(m => m.titulo === SUITE.titulo)) throw new Error(`"${SUITE.titulo}" é reservado; renomeie o milestone`)
+const etapas = [...args.milestones, SUITE]
+
 const retomar = args.retomar ?? null
-const inicio = retomar ? args.milestones.findIndex(m => m.titulo === retomar.aPartirDe) : 0
+const inicio = retomar ? etapas.findIndex(m => m.titulo === retomar.aPartirDe) : 0
 if (retomar && (inicio < 0 || typeof retomar.base !== 'string' || retomar.base.length < 7 ||
   typeof retomar.head !== 'string' || retomar.head.length < 7 || !Array.isArray(retomar.commits) ||
   (retomar.concluidas !== undefined && !Array.isArray(retomar.concluidas)))) {
   throw new Error('args.retomar inválido: use o objeto `retomar` devolvido pela execução que parou ({ aPartirDe, base, head, commits, concluidas })')
 }
-const pendentes = args.milestones.slice(inicio)
-if (inicio > 0) log(`Retomando em "${retomar.aPartirDe}": ${inicio} milestones anteriores já entregues`)
+const pendentes = etapas.slice(inicio)
+if (inicio > 0) log(`Retomando em "${retomar.aPartirDe}": ${inicio} etapas anteriores já entregues`)
 
 const totalFeatures = pendentes.reduce((n, m) => n + m.features.length, 0)
-const estimativa = 2 + 3 * totalFeatures + 4 * pendentes.length
+const milestonesPendentes = pendentes.filter(m => !m.suite).length
+// por milestone: 2 conferências + 2 validadores; suíte final: 2 conferências + 1 validador
+const estimativa = 2 + 3 * totalFeatures + 4 * milestonesPendentes + 3
 log(`Estimativa mínima: ${estimativa} agentes (sem contar correções e retentativas)`)
 
 // agent() devolve null quando o modelo/API cai; nas Missions da Factory quase toda falha de worker foi assim.
@@ -245,10 +256,11 @@ let head = preparo.head
 
 // Como a Factory: antes de começar, guias específicos por tipo de feature, montados a partir do código atual.
 phase('Skills')
-const plano = pendentes.map(m =>
+const plano = pendentes.filter(m => !m.suite).map(m =>
   `## ${m.titulo} (critério: ${m.criterio})\n` + m.features.map(f => `- ${f.titulo}: ${f.spec}`).join('\n'),
 ).join('\n\n')
-const geradas = await comRetentativa('skills da missão', () => agent(
+// Retomando só a suíte final não há feature a guiar: pula o agente de skills.
+const geradas = !plano ? null : await comRetentativa('skills da missão', () => agent(
   'Você prepara as skills desta missão. Leia o plano abaixo e o código que ele toca. Agrupe as features por tipo ' +
   `de trabalho (ex.: ${CONFIG.exemplosSkills}) e escreva um guia curto ` +
   'por tipo: arquivos-modelo do repo para copiar o padrão, onde cada peça mora, comando do teste focado e armadilhas ' +
@@ -451,8 +463,39 @@ async function conferir(base, esperados, fase = 'Validar') {
   return { ok: true, arquivos: c.arquivos }
 }
 
+// Suíte completa do projeto, no HEAD atual, sem alterar código.
+async function validarSuite(anteriores) {
+  const memoria = anteriores.length
+    ? `\nNa rodada anterior falharam: ${anteriores.map(p => p.problema).join(' | ')}. Confirme se foram resolvidos.`
+    : ''
+  const como = CONFIG.suiteCompleta
+    ? `Rode a suíte completa de testes do projeto: ${CONFIG.suiteCompleta}.`
+    : 'Rode a suíte completa de testes do projeto, com os runners já adotados, em todos os módulos e áreas (não só testes focados).'
+  const r = await comRetentativa('suíte completa', () => agent(
+    `${como} Faça isso no HEAD atual, sem alterar código. Guarde a saída completa em arquivo temporário FORA do repositório. ` +
+    'Não rode comandos que alterem lockfiles ou dependências versionadas. Confira `git status` antes e depois: ao ' +
+    'terminar, desfaça somente o que a própria suíte criou ou alterou (remova arquivos novos gerados por ela e use ' +
+    '`git restore -- <path>` nos que ela modificou), deixando a árvore como estava.\n' +
+    'Aprove só se tudo passar. Agrupe as falhas por causa provável: um problema por causa, não um por teste, com o ' +
+    'arquivo provável e a saída relevante. Se a causa for de ambiente (serviço fora do ar, dependência ou ferramenta ' +
+    'ausente, porta ocupada), marque ambiente=true e descreva o que faltou.' + memoria +
+    '\n' + GIT_PROIBIDO,
+    { label: 'suíte completa', phase: 'Suíte final', schema: VALIDACAO },
+  ))
+  if (!r) return { erro: 'o agente da suíte completa não respondeu' }
+  if (!r.aprovado && r.problemas.length === 0) return { erro: 'suíte completa reprovou sem apontar problemas' }
+  // Ambiente não se corrige com código: para e devolve ao usuário em vez de gerar correção.
+  const deAmbiente = r.problemas.filter(p => p.ambiente)
+  if (!r.aprovado && deAmbiente.length) {
+    return { erro: `a suíte completa não roda por causa do ambiente: ${deAmbiente.map(p => p.problema).join(' | ')}. ` +
+      'Ajuste o ambiente e retome' }
+  }
+  return { aprovado: r.aprovado, problemas: r.problemas }
+}
+
 // Dois validadores independentes sobre os commits do milestone, como os 2 runs da Factory.
 async function validar(m, base, arquivos, anteriores) {
+  if (m.suite) return validarSuite(anteriores)
   const intervalo = `${base}..${head}`
   const memoria = anteriores.length
     ? `\nNa rodada anterior foram apontados: ${anteriores.map(p => p.problema).join(' | ')}. ` +
@@ -519,11 +562,13 @@ for (const [i, m] of pendentes.entries()) {
       `concluídos; orçamento de correções recomeça em ${MAX_RODADAS_CORRECAO} rodadas`)
   }
   const aFazer = m.features.filter(f => !jaConcluidas.includes(f.titulo))
-  log(`Milestone: ${m.titulo} (${aFazer.length} de ${m.features.length} features a implementar)`)
+  log(m.suite ? 'Suíte completa do projeto' : `Milestone: ${m.titulo} (${aFazer.length} de ${m.features.length} features a implementar)`)
   const pararAqui = extra => parar(m, base, feitas, commits, extra, jaConcluidas)
   const features = aFazer.map(f => ({ ...f, guias: guiaPorFeature.has(f.titulo) ? [guiaPorFeature.get(f.titulo)] : [] }))
   // Correção pode tocar qualquer parte do milestone: recebe todas as skills dele.
-  const guiasDoMilestone = [...new Set(m.features.filter(f => guiaPorFeature.has(f.titulo)).map(f => guiaPorFeature.get(f.titulo)))]
+  // Na suíte final a falha pode estar em qualquer parte da missão: todas as skills.
+  const guiasDoMilestone = m.suite ? skills
+    : [...new Set(m.features.filter(f => guiaPorFeature.has(f.titulo)).map(f => guiaPorFeature.get(f.titulo)))]
 
   const impl = await implementar(features, 'Implementar')
   feitas.push(...impl.resultados)
@@ -546,8 +591,9 @@ for (const [i, m] of pendentes.entries()) {
     const todos = v.problemas.map(p => `${p.arquivo ?? ''} ${p.problema}`.trim())
     const correcoes = todos.map((p, i) => ({
       titulo: `correção ${rodada}.${i + 1} (${m.titulo})`,
-      spec: `Corrija: ${p}\nMilestone "${m.titulo}", critério: ${m.criterio}, commits ${base}..${head}.\n` +
-        `Outros problemas da mesma rodada (podem ser duplicados deste ou já corrigidos): ${todos.filter((_, j) => j !== i).join(' | ') || 'nenhum'}.`,
+      spec: `Corrija: ${p}\n${m.suite ? 'Falha da suíte completa ao fim da missão' : `Milestone "${m.titulo}", critério: ${m.criterio}, commits ${base}..${head}`}.\n` +
+        `Outros problemas da mesma rodada (podem ser duplicados deste ou já corrigidos): ${todos.filter((_, j) => j !== i).join(' | ') || 'nenhum'}.\n` +
+        'Corrija a causa: não desative, pule nem enfraqueça testes, e não mexa em limites de cobertura para passar.',
       guias: guiasDoMilestone,
     }))
     const fix = await implementar(correcoes, 'Corrigir')

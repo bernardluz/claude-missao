@@ -23,7 +23,9 @@ describe('fluxo principal', () => {
     const r = await rodar(plano())
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.commits, 3)
-    assert.equal(r.agentes, 2 + 3 * 3 + 4 * 2)
+    assert.equal(r.agentes, 2 + 3 * 3 + 4 * 2 + 3)
+    assert.equal(r.contar('suíte completa'), 1)
+    assert.match(r.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${r.agentes} agentes`))
     assert.equal(r.contar('revisão: F'), 3)
     assert.equal(r.contar('commit: '), 3)
   })
@@ -96,6 +98,73 @@ describe('loop de validação e correção', () => {
   })
 })
 
+describe('suíte completa final', () => {
+  test('roda uma vez depois do último milestone', async () => {
+    const r = await rodar(plano())
+    const ordem = r.chamadas.map(c => c.label)
+    assert.ok(ordem.indexOf('suíte completa') > ordem.lastIndexOf('revisão: M2'))
+    assert.match(r.prompt('suíte completa'), /suíte completa de testes do projeto, com os runners já adotados/)
+    assert.equal(r.resultado.relatorio.at(-1).milestone, 'Suíte final')
+  })
+
+  test('falha vira correção com revisão e commit, e a suíte roda de novo', async () => {
+    const r = await rodar(plano(), { suite: [2, 0] })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('suíte completa'), 2)
+    assert.equal(r.contar('commit: correção 1.1 (Suíte final)'), 1)
+    assert.match(r.prompt('correção 1.1 (Suíte final)'), /Falha da suíte completa ao fim da missão/)
+    assert.equal(r.commits, 5)
+  })
+
+  test('sem progresso na suíte, para e permite retomar direto nela', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { suite: [2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'Suíte final')
+    assert.equal(p1.resultado.retomar.aPartirDe, 'Suíte final')
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('F'), 0)
+    assert.equal(p2.contar('revisão: M'), 0)
+    assert.equal(p2.contar('suíte completa'), 1)
+  })
+
+  test('falha de ambiente para sem gerar correção', async () => {
+    const r = await rodar(plano(), { suiteAmbiente: true })
+    assert.equal(r.resultado.parouEm, 'Suíte final')
+    assert.match(r.resultado.motivo, /por causa do ambiente: Docker fora do ar/)
+    assert.equal(r.contar('correção'), 0)
+  })
+
+  test('retomar só a suíte não chama o agente de skills', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { suite: [2, 2] }, estado)
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.contar('skills da missão'), 0)
+    assert.equal(p2.resultado.concluido, true)
+  })
+
+  test('prompt da suíte pede agrupar falhas e limpar o que ela gerou', async () => {
+    const r = await rodar(plano())
+    assert.match(r.prompt('suíte completa'), /um problema por causa, não um por teste/)
+    assert.match(r.prompt('suíte completa'), /desfaça somente o que a própria suíte criou ou alterou/)
+  })
+
+  test('correções não podem enfraquecer testes', async () => {
+    const r = await rodar(plano(), { suite: [1, 0] })
+    assert.match(r.prompt('correção 1.1 (Suíte final)'), /não desative, pule nem enfraqueça testes/)
+  })
+
+  test('usa o comando configurado no projeto', async () => {
+    const r = await rodarCom({ suiteCompleta: 'npm run verify' }, plano())
+    assert.match(r.prompt('suíte completa'), /Rode a suíte completa de testes do projeto: npm run verify\./)
+  })
+
+  test('título de milestone reservado é recusado', async () => {
+    const p = { milestones: [{ titulo: 'Suíte final', criterio: 'c', features: [{ titulo: 'F', spec: 's' }] }] }
+    await assert.rejects(rodar(p), /"Suíte final" é reservado/)
+  })
+})
+
 describe('quedas de agente', () => {
   test('worker cai sem rastro: retenta', async () => {
     const r = await rodar(plano(), { quedas: { F2: 1 } })
@@ -126,6 +195,12 @@ describe('quedas de agente', () => {
     const r = await rodar(plano(), { quedas: { 'commit: F1': 1 } })
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.contar('commit: F1'), 2)
+  })
+
+  test('agente da suíte completa cai uma vez: retenta', async () => {
+    const r = await rodar(plano(), { quedas: { 'suíte completa': 1 } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('suíte completa'), 2)
   })
 
   test('validador cai uma vez: retenta', async () => {

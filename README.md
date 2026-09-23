@@ -18,6 +18,8 @@ Para cada milestone:
      │ aprovou? não → Corrigir (cada problema vira uma feature, com revisão e commit próprios)
      ▼ sim
   próximo milestone
+
+Suíte final → a suíte completa do projeto roda uma vez; cada falha vira correção, no mesmo loop
 ```
 
 O loop de correção segue enquanto a validação aponta **menos** problemas que na rodada anterior.
@@ -77,6 +79,7 @@ Todas as chaves são opcionais. Sem configuração, o workflow usa o agente padr
 | `formatoCommit` | Formato da mensagem de commit | `` `<tipo>: <descrição>` `` |
 | `idioma` | Idioma da mensagem de commit | `pt-BR` |
 | `exemplosSkills` | Exemplos de tipos de trabalho para o agente das skills | genérico |
+| `suiteCompleta` | Como rodar a suíte completa ao fim da missão (comando ou instrução) | suíte completa com os runners do projeto |
 
 Os `agentType` precisam existir no projeto, em `.claude/agents/`. Prefira um `revisor` e um `leitor` que
 tenham só ferramentas de leitura. O agente padrão pode escrever e só obedece à instrução do prompt.
@@ -105,8 +108,10 @@ descartável `missao-teste/`.
 | `retomar` | — | Objeto `retomar` devolvido pela execução que parou |
 | `config` | — | Ajusta só `formatoCommit`, `idioma` e `exemplosSkills` nesta execução. Revisor, leitor e proibições vêm sempre da configuração instalada |
 
-**Custo esperado:** `2 + 3 × features + 4 × milestones` agentes, sem contar correções e
-retentativas.
+**Custo esperado:** `5 + 3 × features + 4 × milestones` agentes, sem contar correções e
+retentativas. A suíte final pode levar muito tempo, conforme o projeto.
+
+O título `Suíte final` é reservado. Se a missão parar na suíte final, a retomada volta direto para ela.
 
 ## Limitações
 
