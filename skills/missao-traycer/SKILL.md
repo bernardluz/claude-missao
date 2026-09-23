@@ -77,13 +77,16 @@ Uma feature por vez. Ticket em status 1.
 
 1. **Implementar.** Crie um filho novo (`traycer_create_agent`, mesmo workspace) e mande: spec da feature, guia do
    tipo, `regrasTestes`, `regrasProjeto`. Proibido: commit, amend, stash, push, trocar de branch, reset/checkout
-   destrutivo, `--no-verify` e `proibicoesExtras`. Peça de volta: arquivos alterados, testes rodados e resultado.
+   destrutivo, `--no-verify`, criar agentes e `proibicoesExtras`. Ele escreve os próprios testes. Se a feature
+   usar escape Unicode, inclua o aviso de [Escapes Unicode](#escapes-unicode). Peça de volta: arquivos alterados,
+   testes rodados e resultado.
 2. **Conferir o git.** Não confie no relato. Confira HEAD igual ao esperado (sem commit de outra sessão) e
    `git status --porcelain` com o conjunto real de arquivos. Arquivo fora do escopo da feature volta ao
    implementador como ajuste.
 3. **Revisar.** Na primeira rodada, crie **um** revisor para a feature: papel de `revisoresPorPasta` quando todos
    os arquivos estão no prefixo, senão `revisor`. Ele só lê. Passe a spec e o `git diff` dos arquivos. Resposta:
-   `aprovado` ou apontamentos bloqueantes, cada um com arquivo e motivo. Registre em `revisao-<n>/`.
+   `aprovado` ou apontamentos bloqueantes, cada um com arquivo e motivo. Quem registra a resposta em `revisao-<n>/`
+   é você: o revisor só lê e não cria artefato.
 4. **Ajustar.** Com apontamentos, devolva-os ao **mesmo** implementador. Na volta, repita o passo 2 e mande o novo
    diff ao **mesmo** revisor, continuando a conversa. Passou de `maxRodadasRevisao`: pare.
 5. **Commit.** Só com `aprovado` na última rodada e sem mudança depois dela. Você commita, sem tocar no código:
@@ -151,4 +154,15 @@ exato: não renomeie entre execuções. Se o repositório não bater, não adivi
   - a fronteira: o que pode mudar, o que deve conferir e o que devolve;
   - o aviso de que o filho não fala com o usuário;
   - o pedido para responder a você com `expectReply: true`.
-- Filhos não criam outros agentes nem commitam.
+- Filhos não criam outros agentes nem commitam. Isso vale mesmo que o guia de seleção de agentes do usuário mande
+  delegar testes a outro agente: o implementador escreve os próprios testes, e o briefing diz isso.
+
+## Escapes Unicode
+
+Ao gravar arquivos, o Write/Edit e o salvamento de artefatos do Traycer trocam a sequência barra invertida + `u` +
+4 dígitos hex pelo próprio caractere. Isso estraga regex e strings de código que precisam do escape.
+
+- Em guias e mensagens, descreva o caractere pelo código (`U+2026`) em vez de escrever o escape.
+- Avise no briefing o implementador que precisar de escape: grave um marcador e troque via `node`
+  (`String.fromCharCode(92)`), ou use `String.fromCharCode(0x2026)` no código.
+- Peça que ele confira os bytes do arquivo gravado, e peça o mesmo ao revisor.
