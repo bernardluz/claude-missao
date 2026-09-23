@@ -4,7 +4,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { missoes, commitsDaMissao, raizPadrao } from './leitor.mjs'
+import { missoes, commitsDaMissao, raizPadrao, lerPassos, localizarExecucao } from './leitor.mjs'
 import { arquivoLimites } from './statusline.mjs'
 import { agendarLimites, INTERVALO_MIN_MINUTOS } from './limites-cli.mjs'
 
@@ -48,6 +48,14 @@ export function criarServidor({ raiz = raizPadrao(), porta }) {
       if (url.pathname === '/') return responder(res, 200, fs.readFileSync(PAGINA, 'utf8'), 'text/html; charset=utf-8')
       if (url.pathname === '/api/missoes') return responder(res, 200, atuais().map(resumo))
       if (url.pathname === '/api/limites') return responder(res, 200, { limites: lerLimites(raiz) })
+      const passos = url.pathname.match(/^\/api\/passos\/(wf_[A-Za-z0-9_-]{1,80})\/(a[0-9a-f]{6,40})$/)
+      if (passos) {
+        const dir = localizarExecucao(passos[1], raiz)
+        const lidos = dir && lerPassos(path.join(dir, `agent-${passos[2]}.jsonl`))
+        if (!lidos) return responder(res, 404, { erro: 'agente não encontrado' })
+        const desde = Math.max(0, Math.floor(Number(url.searchParams.get('desde')) || 0))
+        return responder(res, 200, { total: lidos.passos.length, desde, passos: lidos.passos.slice(desde), atualizadoEm: lidos.mtime })
+      }
       const detalhe = url.pathname.match(/^\/api\/missoes\/([0-9a-f]{12})$/)
       if (detalhe) {
         const m = atuais().find(x => x.id === detalhe[1])

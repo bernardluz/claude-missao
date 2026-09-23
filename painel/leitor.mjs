@@ -28,14 +28,14 @@ function subpastas(dir) {
 
 // Leitura incremental: guarda o deslocamento e só processa bytes novos, cortando na última quebra de linha.
 const cache = new Map()
-function lerIncremental(arquivo, aoLer) {
+function lerIncremental(arquivo, aoLer, chave = arquivo) {
   let st
   try {
     st = fs.statSync(arquivo)
   } catch {
-    return cache.get(arquivo)?.estado ?? null
+    return cache.get(chave)?.estado ?? null
   }
-  let c = cache.get(arquivo)
+  let c = cache.get(chave)
   if (!c || st.size < c.tamanho) c = { tamanho: 0, estado: aoLer(null, null) }
   if (st.size > c.tamanho) {
     let buf
@@ -65,7 +65,7 @@ function lerIncremental(arquivo, aoLer) {
     }
   }
   c.estado.mtime = st.mtimeMs
-  cache.set(arquivo, c)
+  cache.set(chave, c)
   return c.estado
 }
 
@@ -99,6 +99,70 @@ export function lerAgente(arquivo) {
       })
     }
   })
+}
+
+// Passos de um agente para a visão ao vivo: tarefa, textos, "pensou" (o conteúdo do raciocínio não é gravado),
+// ferramentas com o essencial da entrada e resultados resumidos. Textos longos são cortados.
+const CORTE = 4000
+const cortar = (t, n = CORTE) => { const s = String(t ?? ''); return s.length > n ? `${s.slice(0, n)}
+… (+${s.length - n} caracteres)` : s }
+function resumoFerramenta(nome, e = {}) {
+  if (nome === 'Bash' || nome === 'PowerShell') return { resumo: e.description || e.command, detalhe: e.command }
+  if (['Read', 'Write', 'Edit', 'NotebookEdit'].includes(nome)) {
+    const detalhe = nome === 'Edit' ? `- ${cortar(e.old_string, 1500)}
++ ${cortar(e.new_string, 1500)}` : nome === 'Write' ? cortar(e.content, 1500) : ''
+    return { resumo: e.file_path, detalhe }
+  }
+  if (nome === 'Grep') return { resumo: `${e.pattern}${e.path ? ` em ${e.path}` : ''}`, detalhe: '' }
+  if (nome === 'Glob') return { resumo: e.pattern, detalhe: '' }
+  if (nome === 'StructuredOutput') return { resumo: 'resultado final', detalhe: cortar(JSON.stringify(e, null, 2)) }
+  return { resumo: nome, detalhe: cortar(JSON.stringify(e, null, 2), 1500) }
+}
+export function lerPassos(arquivo) {
+  return lerIncremental(arquivo, (e, o) => {
+    if (!e) return { passos: [], respondeu: false, mtime: 0 }
+    const c = o.message?.content
+    const quando = o.timestamp ?? null
+    if (o.type === 'user' && !e.respondeu) {
+      const texto = textoDe(c)
+      if (texto.trim()) e.passos.push({ tipo: 'tarefa', quando, texto: cortar(texto, 6000) })
+      return
+    }
+    if (o.type === 'assistant') {
+      e.respondeu = true
+      for (const p of Array.isArray(c) ? c : []) {
+        if (p.type === 'text' && p.text?.trim()) e.passos.push({ tipo: 'texto', quando, texto: cortar(p.text) })
+        else if (p.type === 'thinking' && e.passos.at(-1)?.tipo !== 'pensou') e.passos.push({ tipo: 'pensou', quando })
+        else if (p.type === 'tool_use') e.passos.push({ tipo: 'ferramenta', quando, id: p.id, nome: p.name, ...resumoFerramenta(p.name, p.input) })
+      }
+      return
+    }
+    if (o.type === 'user') {
+      for (const p of Array.isArray(c) ? c : []) {
+        if (p.type !== 'tool_result') continue
+        const texto = typeof p.content === 'string' ? p.content : textoDe(p.content)
+        e.passos.push({ tipo: 'resultado', quando, id: p.tool_use_id, erro: p.is_error === true, texto: cortar(texto) })
+      }
+    }
+  }, `passos:${arquivo}`)
+}
+
+// Pasta de uma execução pelo id (wf_…). Só aceita o formato do id: nada de caminho.
+const execucoesAchadas = new Map()
+export function localizarExecucao(runId, raiz = raizPadrao()) {
+  if (!/^wf_[A-Za-z0-9_-]{1,80}$/.test(runId)) return null
+  const memo = execucoesAchadas.get(`${raiz}|${runId}`)
+  if (memo && fs.existsSync(path.join(memo, 'journal.jsonl'))) return memo
+  for (const projeto of subpastas(path.join(raiz, 'projects'))) {
+    for (const sessao of subpastas(projeto)) {
+      const dir = path.join(sessao, 'subagents', 'workflows', runId)
+      if (fs.existsSync(path.join(dir, 'journal.jsonl'))) {
+        execucoesAchadas.set(`${raiz}|${runId}`, dir)
+        return dir
+      }
+    }
+  }
+  return null
 }
 
 function tokensDe(agente) {
@@ -293,7 +357,7 @@ function montarMissao(id, runs) {
   for (const [indice, r] of runs.entries()) {
     const execucao = indice + 1
     for (const c of r.chamadas) {
-      const chamada = { ...c, execucao, viva: r.viva }
+      const chamada = { ...c, execucao, viva: r.viva, ref: `${r.runId}/${c.agentId}` }
       linhaDoTempo.push(chamada)
       if (c.tipo === 'testes' || (c.tipo === 'revisao' && porTitulo.has(c.alvo))) {
         porTitulo.get(c.alvo)?.validacoes.push(chamada)
@@ -342,10 +406,14 @@ function montarMissao(id, runs) {
       duracaoMs: cs.reduce((s, c) => s + c.duracaoMs, 0),
       tokens: cs.reduce((s, c) => s + c.tokens.total, 0),
       agentes: cs.length,
+      chamadas: cs.map(c => ({ ref: c.ref, label: c.label, tipo: c.tipo, rodada: c.rodada ?? null, inicio: c.inicio, duracaoMs: c.duracaoMs, estado: estadoChamada(c) })),
+      pipeline: pipelineDe(cs, !!commit),
     }
   }
   // Milestone validado encerra o que ficou sem commit registrado (feito à mão ou já resolvido).
-  const encerrar = validado => f => validado && f.estado !== 'feita' ? { ...f, estado: 'feita', semCommitRegistrado: true } : f
+  const encerrar = validado => f => validado && f.estado !== 'feita'
+    ? { ...f, estado: 'feita', semCommitRegistrado: true, pipeline: f.pipeline.map(p => (p.estado === 'feita' ? p : { ...p, estado: 'pulada' })) }
+    : f
 
   let feitas = 0
   let total = 0
@@ -382,6 +450,7 @@ function montarMissao(id, runs) {
 
   const estado = suite.estado === 'validado' ? 'concluida' : ultima.viva ? 'rodando' : 'parada'
   const emCurso = linhaDoTempo.findLast(rodando)
+  const featureAtual = milestones.flatMap(m => [...m.features, ...m.correcoes].map(f => ({ ...f, milestone: m.titulo }))).find(f => f.estado === 'rodando') ?? null
   const ultimaChamada = linhaDoTempo.at(-1)
   const preparo = runs[0].preparo
   return {
@@ -393,6 +462,8 @@ function montarMissao(id, runs) {
     estado,
     progresso: { feitas, total },
     atual: emCurso ? rotuloEtapa(emCurso) : null,
+    agora: emCurso ? { ref: emCurso.ref, label: emCurso.label, inicio: emCurso.inicio, etapa: rotuloEtapa(emCurso) } : null,
+    featureAtual: featureAtual ? { titulo: featureAtual.titulo, milestone: featureAtual.milestone, pipeline: featureAtual.pipeline } : null,
     ultimoEvento: ultimaChamada ? { label: ultimaChamada.label, resumo: resumoDe(ultimaChamada) } : null,
     inicio: runs[0].inicio,
     ultimaAtividade: Math.max(...runs.map(r => r.ultimaAtividade)),
@@ -403,10 +474,30 @@ function montarMissao(id, runs) {
     milestones,
     skills: ultima.skills.length ? ultima.skills : runs.findLast(r => r.skills.length)?.skills ?? [],
     linhaDoTempo: linhaDoTempo.slice(-40).reverse().map(c => ({
-      label: c.label, execucao: c.execucao, inicio: c.inicio, duracaoMs: c.duracaoMs, tokens: c.tokens.total,
+      ref: c.ref, label: c.label, execucao: c.execucao, inicio: c.inicio, duracaoMs: c.duracaoMs, tokens: c.tokens.total,
       estado: c.aberta ? (c.viva ? 'rodando' : 'interrompido') : c.caiu ? 'caiu' : 'ok', resumo: resumoDe(c),
     })),
   }
+}
+
+function estadoChamada(c) {
+  return c.aberta ? (c.viva ? 'rodando' : 'interrompido') : c.caiu ? 'caiu' : 'ok'
+}
+
+// Etapas de uma feature: implementar → revisão → ajustes → commit, cada uma feita, agora, pendente ou pulada.
+function pipelineDe(cs, commitado) {
+  const de = tipo => cs.filter(c => c.tipo === tipo)
+  const etapa = (nome, lista, pulada = false) => {
+    const ultima = lista.at(-1)
+    const estado = !ultima ? (pulada ? 'pulada' : 'pendente') : ultima.aberta ? (ultima.viva ? 'agora' : 'parou') : ultima.caiu ? 'parou' : 'feita'
+    return { nome, estado, vezes: lista.length }
+  }
+  const revisoes = de('revisao')
+  const aprovada = revisoes.at(-1)?.resultado?.aprovado === true
+  const ajustes = de('ajuste')
+  const passos = [etapa('Implementar', de('trabalho')), etapa('Revisão independente', revisoes), etapa('Ajustes', ajustes, aprovada && !ajustes.length), etapa('Commit atômico', de('commit'))]
+  if (commitado) for (const p of passos) if (p.estado === 'pendente') p.estado = 'pulada'
+  return passos
 }
 
 function etapaCurta(c) {

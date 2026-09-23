@@ -126,7 +126,11 @@ nenhuma. A página mostra:
 - a árvore de milestones e features, com o estado de cada uma;
 - a etapa atual, as rodadas de ajuste e os apontamentos da revisão;
 - as correções de cada milestone e os commits;
-- os últimos agentes e as skills.
+- os últimos agentes e as skills;
+- **ao vivo:** o que o agente em curso está fazendo, passo a passo, a cada 2 segundos. Aparecem as mensagens,
+  os comandos, os arquivos lidos e editados (com o diff) e o resultado de cada ferramenta. Clique em qualquer
+  agente de uma feature, ou na atividade, para ver o que ele fez. O raciocínio interno não é gravado, só a marca
+  de que o agente pensou.
 
 Ela se atualiza a cada 5 segundos.
 

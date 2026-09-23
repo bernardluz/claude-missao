@@ -420,3 +420,68 @@ test('limites pelo CLI: acha o executável pelo PATH, ignorando a pasta de traba
   assert.equal(acharExecutavel('claude', dir), join(dir, nome))
   assert.equal(acharExecutavel('claude', ''), null)
 })
+
+test('passos ao vivo: tarefa, pensamento, ferramenta com resultado e texto, incremental', async () => {
+  const { lerPassos } = await import('../painel/leitor.mjs')
+  const dir = temp()
+  const arquivo = join(dir, 'agent-a1234567.jsonl')
+  const linhas = [
+    { type: 'user', timestamp: 't0', message: { content: 'Implemente a feature' } },
+    { type: 'assistant', timestamp: 't1', message: { content: [{ type: 'thinking', thinking: '' }, { type: 'tool_use', id: 'u1', name: 'Bash', input: { command: 'mvnw test', description: 'Roda os testes' } }] } },
+    { type: 'user', timestamp: 't2', message: { content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'BUILD SUCCESS' }] } },
+    { type: 'attachment', timestamp: 't2' },
+  ]
+  writeFileSync(arquivo, linhas.map(o => JSON.stringify(o)).join('\n') + '\n')
+  let p = lerPassos(arquivo).passos
+  assert.deepEqual(p.map(x => x.tipo), ['tarefa', 'pensou', 'ferramenta', 'resultado'])
+  assert.equal(p[2].resumo, 'Roda os testes')
+  assert.equal(p[2].detalhe, 'mvnw test')
+  assert.equal(p[3].texto, 'BUILD SUCCESS')
+  appendFileSync(arquivo, JSON.stringify({ type: 'assistant', timestamp: 't3', message: { content: [
+    { type: 'tool_use', id: 'u2', name: 'Edit', input: { file_path: 'a.kt', old_string: 'x', new_string: 'y' } },
+    { type: 'text', text: 'Pronto.' },
+  ] } }) + '\n')
+  p = lerPassos(arquivo).passos
+  assert.equal(p.length, 6)
+  assert.equal(p[4].resumo, 'a.kt')
+  assert.match(p[4].detalhe, /^- x\n\+ y$/)
+  assert.equal(p[5].texto, 'Pronto.')
+})
+
+test('servidor: /api/passos devolve passos a partir de desde e recusa id inválido', async () => {
+  const raiz = temp()
+  const dir = join(raiz, 'projects', 'p', 's', 'subagents', 'workflows', 'wf_abc-1')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'journal.jsonl'), '')
+  writeFileSync(join(dir, 'agent-abcdef12.jsonl'), [
+    { type: 'user', message: { content: 'tarefa' } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'oi' }] } },
+  ].map(o => JSON.stringify(o)).join('\n') + '\n')
+  const s0 = criarServidor({ raiz, porta: 0 })
+  await new Promise(r => s0.listen(0, '127.0.0.1', r))
+  const porta = s0.address().port
+  await new Promise(r => s0.close(r))
+  const s = criarServidor({ raiz, porta })
+  await new Promise(r => s.listen(porta, '127.0.0.1', r))
+  try {
+    const base = `http://127.0.0.1:${porta}/api/passos`
+    const tudo = await (await fetch(`${base}/wf_abc-1/abcdef12`)).json()
+    assert.equal(tudo.total, 2)
+    const depois = await (await fetch(`${base}/wf_abc-1/abcdef12?desde=1`)).json()
+    assert.deepEqual(depois.passos.map(x => x.texto), ['oi'])
+    assert.equal((await fetch(`${base}/wf_abc-1/..%2Fx`)).status, 404)
+    assert.equal((await fetch(`${base}/wf_nao-existe/abcdef12`)).status, 404)
+  } finally {
+    await new Promise(r => s.close(r))
+  }
+})
+
+test('pipeline: commit que caiu fica parou, não feita', () => {
+  const raiz = temp()
+  execucao(raiz, 'wf_1', [
+    ...inicio, ['F1 Admin: base e Contas', { concluida: true }], ['revisão: F1 Admin: base e Contas', ok],
+    ['commit: F1 Admin: base e Contas', CAIU],
+  ], { idadeMs: 5 * MIN })
+  const p = missoes(raiz)[0].milestones[0].features[0].pipeline
+  assert.deepEqual(p.map(x => x.estado), ['feita', 'feita', 'pulada', 'parou'])
+})

@@ -4,241 +4,401 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Painel das missões</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --fundo: #f6f7f9; --cartao: #ffffff; --texto: #1c2230; --suave: #5d6677; --linha: #e3e6ec;
-  --azul: #2f6fed; --verde: #1f9d57; --amarelo: #c98a04; --vermelho: #d14343; --cinza: #9aa3b2;
-  --azul-f: #e8f0fe; --verde-f: #e6f6ed; --amarelo-f: #fdf4dc; --vermelho-f: #fdeaea; --cinza-f: #eef0f4;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fundo: #0f1218; --cartao: #171b23; --texto: #e6e9ef; --suave: #9aa3b2; --linha: #262c38;
-    --azul: #6b9bff; --verde: #3ecf85; --amarelo: #f0b94a; --vermelho: #ff7676; --cinza: #6c7486;
-    --azul-f: #1b2640; --verde-f: #14291f; --amarelo-f: #2f2712; --vermelho-f: #331a1c; --cinza-f: #1f242e;
-  }
+  --fundo: #0d1015; --barra: #10141a; --cartao: #141920; --cartao-2: #10141a; --linha: #1f252e; --linha-2: #1a2029;
+  --texto: #e7ebf1; --texto-2: #c3cad4; --suave: #9aa4b2; --apagado: #5d6776;
+  --verde: #3fb27f; --verde-t: #8fe0b8; --verde-f: #1d3a2d; --verde-b: #2a5a43;
+  --azul: #8fb4ff; --azul-t: #b8cfff; --azul-f: #1b2a47; --azul-b: #2f5fbf; --agora-f: #121a28; --agora-b: #25406f;
+  --ambar: #e0a93b; --ambar-t: #f0c56a; --ambar-f: #3a2e12; --vermelho: #f06a6a; --vermelho-f: #3a1c1e;
+  --mono: 'Geist Mono', ui-monospace, Consolas, monospace;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--fundo); color: var(--texto); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--linha); background: var(--cartao); position: sticky; top: 0; z-index: 2; }
-header h1 { font-size: 16px; margin: 0; }
-header .atualizado { margin-left: auto; color: var(--suave); font-size: 12px; }
-.pulso { width: 8px; height: 8px; border-radius: 50%; background: var(--verde); display: inline-block; }
-main { display: grid; grid-template-columns: 300px 1fr; gap: 16px; padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
-@media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
-.lista { display: flex; flex-direction: column; gap: 8px; }
-.item { background: var(--cartao); border: 1px solid var(--linha); border-radius: 10px; padding: 10px 12px; cursor: pointer; text-align: left; color: inherit; font: inherit; width: 100%; }
-.item.ativo { border-color: var(--azul); box-shadow: 0 0 0 1px var(--azul); }
-.item .topo { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-.item .nome { font-weight: 600; }
-.item .sub { color: var(--suave); font-size: 12px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.barra { height: 6px; background: var(--cinza-f); border-radius: 4px; overflow: hidden; margin-top: 8px; }
-.barra > div { height: 100%; background: var(--verde); }
-.selo { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
-.s-rodando, .s-validando, .s-corrigindo { background: var(--azul-f); color: var(--azul); }
-.s-concluida, .s-validado, .s-feita, .s-aprovado, .s-ok { background: var(--verde-f); color: var(--verde); }
-.s-parada, .s-parou, .s-reprovado, .s-interrompido, .s-caiu { background: var(--vermelho-f); color: var(--vermelho); }
-.s-pendente { background: var(--cinza-f); color: var(--suave); }
-.cartao { background: var(--cartao); border: 1px solid var(--linha); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
-.cab { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
-.cab h2 { margin: 0; font-size: 18px; }
-.metricas { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 14px; }
-.metrica { background: var(--fundo); border-radius: 8px; padding: 8px 10px; }
-.metrica .v { font-size: 16px; font-weight: 650; }
-.metrica .r { color: var(--suave); font-size: 12px; }
-.agora { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--azul-f); color: var(--texto); }
-.agora.parada { background: var(--vermelho-f); }
-details.ms { border: 1px solid var(--linha); border-radius: 10px; margin-bottom: 8px; background: var(--cartao); }
-details.ms > summary { list-style: none; cursor: pointer; padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
-details.ms > summary::-webkit-details-marker { display: none; }
-.icone { width: 20px; text-align: center; flex: none; }
-.ms-titulo { font-weight: 600; flex: 1; min-width: 0; }
-.conta { color: var(--suave); font-size: 12px; white-space: nowrap; }
-.feats { border-top: 1px solid var(--linha); padding: 4px 0; }
-.feat { border-bottom: 1px dashed var(--linha); }
+body { margin: 0; background: var(--fundo); color: var(--texto); font: 14px/1.45 Geist, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+button { font: inherit; color: inherit; }
+a { color: var(--azul); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.suave { color: var(--suave); }
+
+header { position: sticky; top: 0; z-index: 5; height: 64px; display: flex; align-items: center; gap: 28px; padding: 0 28px; background: var(--barra); border-bottom: 1px solid var(--linha); }
+.marca { display: flex; align-items: center; gap: 10px; width: 220px; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.pulso { width: 10px; height: 10px; border-radius: 50%; background: var(--verde); box-shadow: 0 0 0 4px rgba(63,178,127,.18); }
+.pulso.erro { background: var(--vermelho); box-shadow: 0 0 0 4px rgba(240,106,106,.18); }
+.limites { display: flex; gap: 28px; flex-grow: 1; align-items: center; min-width: 0; }
+.limite { display: flex; align-items: center; gap: 12px; }
+.limite .rot { display: flex; flex-direction: column; font-size: 12px; color: var(--suave); width: 112px; line-height: 1.3; }
+.medidor { width: 150px; height: 8px; border-radius: 999px; background: var(--linha); overflow: hidden; }
+.medidor > div { height: 100%; border-radius: 999px; background: var(--verde); }
+.medidor.alerta > div { background: var(--ambar); } .medidor.critico > div { background: var(--vermelho); }
+.limite b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; width: 52px; }
+.atualizado { font-size: 12px; color: var(--suave); white-space: nowrap; }
+
+.corpo { display: flex; min-height: calc(100vh - 64px); }
+nav.missoes { width: 250px; flex-shrink: 0; padding: 22px 14px; border-right: 1px solid var(--linha); display: flex; flex-direction: column; gap: 8px; }
+.grupo { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--suave); padding: 12px 8px 2px; }
+.missao { display: flex; flex-direction: column; gap: 8px; width: 100%; text-align: left; cursor: pointer; padding: 12px 14px; border-radius: 12px; background: transparent; border: 1px solid transparent; }
+.missao:hover { background: var(--cartao); }
+.missao.ativa { background: var(--cartao); border-color: var(--azul-b); }
+.missao .topo { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.missao .sub { font-size: 12px; color: var(--suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fina { height: 4px; border-radius: 999px; background: var(--linha); overflow: hidden; } .fina > div { height: 100%; background: var(--verde); }
+
+main { flex-grow: 1; min-width: 0; padding: 26px 30px 40px; display: flex; flex-direction: column; gap: 18px; }
+.vazio { color: var(--suave); padding: 60px; text-align: center; }
+.hero { display: flex; align-items: flex-end; gap: 32px; flex-wrap: wrap; }
+.hero .esq { display: flex; flex-direction: column; gap: 6px; flex-grow: 1; min-width: 280px; }
+.titulo { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.titulo h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+.grande { font-size: 46px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.grande span { color: var(--apagado); }
+.metricas { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; flex-basis: 700px; flex-grow: 1; max-width: 760px; }
+.metrica { padding: 13px 15px; border-radius: 12px; background: var(--cartao); border: 1px solid var(--linha); }
+.metrica .v { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.metrica .r { font-size: 12px; color: var(--suave); }
+
+.selo { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.selo .p { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.s-rodando, .s-agora, .s-validando, .s-corrigindo { background: var(--azul-f); color: var(--azul); }
+.s-concluida, .s-validado, .s-feita, .s-ok, .s-aprovado { background: var(--verde-f); color: var(--verde-t); }
+.s-parada, .s-parou, .s-caiu, .s-interrompido, .s-reprovado { background: var(--vermelho-f); color: var(--vermelho); }
+.s-pendente, .s-pulada { background: var(--cartao); color: var(--suave); border: 1px solid var(--linha); }
+
+.trilha { display: flex; gap: 6px; height: 38px; }
+.trilha > div { flex-basis: 0; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 11px; font-size: 12px; min-width: 0; }
+.trilha b { font-size: 13px; }
+.t-validado { background: var(--verde-f); border: 1px solid var(--verde-b); color: var(--verde-t); }
+.t-andamento { background: var(--azul-f); border: 1px solid var(--azul-b); color: var(--azul-t); }
+.t-parou { background: var(--vermelho-f); border: 1px solid #6a2e31; color: var(--vermelho); }
+.t-pendente { background: var(--cartao); border: 1px solid #2a313c; color: var(--suave); }
+.legenda { display: flex; gap: 18px; font-size: 12px; color: var(--suave); margin-top: 8px; }
+.legenda span { display: flex; align-items: center; gap: 6px; } .legenda i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+.grade { display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 18px; align-items: start; }
+@media (max-width: 1180px) { .grade { grid-template-columns: 1fr; } nav.missoes { width: 210px; } .limite .rot { width: 90px; } }
+@media (max-width: 860px) { nav.missoes { display: none; } header { height: auto; flex-wrap: wrap; padding: 12px 16px; } main { padding: 16px; } .metricas { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.cartao { border-radius: 14px; background: var(--cartao); border: 1px solid var(--linha); }
+.cab { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--linha); }
+.cab h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.rotulo { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+
+.agora { padding: 18px 20px; border-radius: 14px; background: var(--agora-f); border: 1px solid var(--agora-b); display: flex; flex-direction: column; gap: 14px; }
+.agora.parada { background: var(--vermelho-f); border-color: #6a2e31; }
+.agora.concluida { background: var(--verde-f); border-color: var(--verde-b); }
+.agora .linha { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.agora .nome { font-size: 19px; font-weight: 600; }
+.etapas { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.etapas li { padding: 9px 12px; border-radius: 10px; display: flex; flex-direction: column; gap: 1px; font-size: 13px; font-weight: 600; }
+.etapas li span { font-size: 12px; font-weight: 400; color: var(--suave); }
+.e-feita { background: var(--verde-f); border: 1px solid var(--verde-b); color: var(--verde-t); }
+.e-agora { background: var(--azul-f); border: 1px solid var(--azul-b); color: var(--azul-t); }
+.e-parou { background: var(--vermelho-f); border: 1px solid #6a2e31; color: var(--vermelho); }
+.e-pendente, .e-pulada { background: var(--cartao-2); border: 1px solid #2a313c; color: var(--suave); }
+
+.vivo .quem { min-width: 0; display: flex; flex-direction: column; }
+.vivo .quem b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.botao { cursor: pointer; padding: 6px 12px; border-radius: 8px; background: var(--cartao-2); border: 1px solid var(--linha); font-size: 12px; white-space: nowrap; }
+.botao:hover { border-color: var(--azul-b); }
+.botao.on { background: var(--azul-f); border-color: var(--azul-b); color: var(--azul-t); }
+.feed { height: 480px; overflow-y: auto; padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 6px; }
+.passo { display: flex; gap: 10px; align-items: flex-start; }
+.passo .ic { width: 26px; height: 26px; flex-shrink: 0; border-radius: 7px; display: grid; place-items: center; background: var(--cartao-2); border: 1px solid var(--linha); color: var(--suave); }
+.passo .ic svg { width: 14px; height: 14px; }
+.passo .cont { flex-grow: 1; min-width: 0; }
+.passo .lin { display: flex; gap: 8px; align-items: baseline; }
+.passo .res { flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.passo .h { font-size: 11px; color: var(--apagado); flex-shrink: 0; }
+.passo details > summary { cursor: pointer; list-style: none; }
+.passo details > summary::-webkit-details-marker { display: none; }
+.passo pre { margin: 6px 0 2px; padding: 8px 10px; border-radius: 8px; background: var(--cartao-2); border: 1px solid var(--linha-2); white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--mono); color: var(--texto-2); max-height: 320px; overflow: auto; }
+.passo .saida { font-size: 12px; color: var(--suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.passo .saida.erro { color: var(--vermelho); }
+.passo.texto .cont { padding: 8px 12px; border-radius: 10px; background: var(--agora-f); border: 1px solid var(--agora-b); white-space: pre-wrap; word-break: break-word; }
+.passo.pensou { color: var(--apagado); font-size: 12px; padding-left: 36px; }
+.i-bash { color: var(--azul); } .i-edit { color: var(--ambar); } .i-read { color: var(--suave); } .i-busca { color: #b99bff; } .i-fim { color: var(--verde); }
+
+.feat { border-bottom: 1px solid var(--linha-2); }
 .feat:last-child { border-bottom: 0; }
-.feat > summary { list-style: none; cursor: pointer; display: flex; gap: 10px; align-items: center; padding: 7px 12px 7px 16px; }
+.feat > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px; padding: 11px 18px; }
 .feat > summary::-webkit-details-marker { display: none; }
-.feat .t { flex: 1; min-width: 0; }
-.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; }
-.corpo { padding: 4px 16px 12px 46px; color: var(--suave); font-size: 13px; }
-.corpo pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0; font: inherit; color: var(--texto); }
-.problema { border-left: 3px solid var(--amarelo); padding: 4px 8px; margin: 6px 0; background: var(--amarelo-f); color: var(--texto); border-radius: 0 6px 6px 0; white-space: pre-wrap; word-break: break-word; }
-.validacoes { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 10px 42px; border-top: 1px solid var(--linha); }
-h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--suave); margin: 0 0 10px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-td { padding: 6px 8px; border-bottom: 1px solid var(--linha); vertical-align: top; }
-td.n { white-space: nowrap; color: var(--suave); }
-.vazio { color: var(--suave); padding: 40px; text-align: center; }
-.limites { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--suave); }
-.limite { display: flex; align-items: center; gap: 6px; }
-.limite b { color: var(--texto); font-weight: 600; }
-.mini { width: 90px; height: 6px; background: var(--cinza-f); border-radius: 4px; overflow: hidden; }
-.mini > div { height: 100%; background: var(--verde); }
-.mini.alerta > div { background: var(--amarelo); }
-.mini.critico > div { background: var(--vermelho); }
-@media (max-width: 860px) { header { flex-wrap: wrap; } .limites { order: 3; width: 100%; } }
-.girando { display: inline-block; animation: gira 1.2s linear infinite; }
+.feat > summary:hover { background: #161c24; }
+.feat .t { flex-grow: 1; min-width: 0; }
+.feat .meta { font-size: 12px; color: var(--suave); white-space: nowrap; }
+.feat .sha { width: 72px; text-align: right; color: var(--azul); }
+.feat .dentro { margin: 0 18px 14px 48px; padding: 12px 14px; border-radius: 10px; background: var(--cartao-2); display: flex; flex-direction: column; gap: 10px; font-size: 13px; color: var(--texto-2); }
+.feat .dentro pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; }
+.apont { display: flex; gap: 10px; }
+.apont .tag { flex-shrink: 0; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; height: 18px; background: var(--ambar-f); color: var(--ambar-t); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { cursor: pointer; padding: 4px 10px; border-radius: 999px; font-size: 12px; background: var(--cartao); border: 1px solid var(--linha); }
+.chip:hover, .chip.on { border-color: var(--azul-b); color: var(--azul-t); }
+.ms > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--linha-2); }
+.ms > summary::-webkit-details-marker { display: none; }
+.ms > summary .t { flex-grow: 1; min-width: 0; font-size: 13px; color: var(--texto-2); }
+.ms[open] > summary .t { color: var(--texto); font-weight: 600; }
+.ico { width: 18px; height: 18px; flex-shrink: 0; }
+.gira { animation: gira 1.1s linear infinite; }
 @keyframes gira { to { transform: rotate(360deg); } }
+.probs { padding: 10px 18px 14px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--linha-2); }
+
+.ativ { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 2px; }
+.ativ button { display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left; background: none; border: 0; padding: 6px 4px; border-radius: 8px; cursor: pointer; }
+.ativ button:hover { background: #161c24; }
+.ativ .ponto { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+.ativ .txt { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; }
+.ativ .txt b { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ativ .txt span { font-size: 12px; color: var(--suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ativ .qdo { font-size: 12px; color: var(--suave); flex-shrink: 0; }
+.commits { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; }
+.commits div { display: flex; gap: 10px; font-size: 13px; }
+.commits div span:last-child { color: var(--texto-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.bloco > summary { list-style: none; cursor: pointer; }
+details.bloco > summary::-webkit-details-marker { display: none; }
+.skill { padding: 10px 16px; border-top: 1px solid var(--linha-2); }
+.skill pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--mono); color: var(--texto-2); margin: 6px 0 0; }
 </style>
 </head>
 <body>
 <header>
-  <span class="pulso" id="pulso"></span>
-  <h1>Painel das missões</h1>
+  <div class="marca"><span class="pulso" id="pulso"></span>Missões</div>
   <div class="limites" id="limites" aria-label="Limites da assinatura"></div>
   <span class="atualizado" id="atualizado">carregando…</span>
 </header>
-<main>
-  <nav class="lista" id="lista" aria-label="Missões"></nav>
-  <section id="detalhe"><div class="vazio">Nenhuma missão encontrada ainda.</div></section>
-</main>
+<div class="corpo">
+  <nav class="missoes" id="lista" aria-label="Missões"></nav>
+  <main id="detalhe"><div class="vazio">Nenhuma missão encontrada ainda.</div></main>
+</div>
 <script>
 const $ = s => document.querySelector(s)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
-const NOMES = { rodando: 'rodando', concluida: 'concluída', parada: 'parada', validado: 'validado', validando: 'validando', corrigindo: 'corrigindo', pendente: 'pendente', parou: 'parou', feita: 'feita', aprovado: 'aprovado', reprovado: 'reprovado', interrompido: 'interrompido', caiu: 'caiu', ok: 'ok' }
-const ICONES = { feita: '✅', validado: '✅', rodando: '<span class="girando">⟳</span>', validando: '<span class="girando">⟳</span>', corrigindo: '🛠️', parou: '⛔', pendente: '○' }
-const selo = e => `<span class="selo s-${esc(e)}">${esc(NOMES[e] ?? e)}</span>`
-const tempo = ms => { if (!ms || ms < 0) return '—'; const m = Math.round(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min` }
-const quando = t => { if (!t) return '—'; const d = typeof t === 'number' ? new Date(t) : new Date(t); return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
-const ha = t => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `há ${s} s` : s < 3600 ? `há ${Math.round(s / 60)} min` : `há ${Math.round(s / 3600)} h` }
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0)
-const tokens = v => { const n = num(v); return n >= 1e6 ? `${(n / 1e6).toFixed(1)} M` : n >= 1e3 ? `${Math.round(n / 1e3)} k` : String(n) }
+const NOMES = { rodando: 'rodando', concluida: 'concluída', parada: 'parada', validado: 'validado', validando: 'validando', corrigindo: 'corrigindo', pendente: 'pendente', parou: 'parou', feita: 'feita', aprovado: 'aprovado', reprovado: 'reprovado', interrompido: 'interrompido', caiu: 'caiu', ok: 'ok', agora: 'agora', pulada: 'pulada' }
+const CLASSES = new Set(Object.keys(NOMES))
+const selo = (e, texto) => `<span class="selo s-${CLASSES.has(e) ? e : 'pendente'}"><span class="p"></span>${esc(texto ?? NOMES[e] ?? e)}</span>`
+const duracao = ms => { if (!ms || ms < 0) return '—'; const m = Math.round(ms / 60000); return m < 1 ? '< 1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min` }
+const ha = t => { const s = Math.round((Date.now() - num(typeof t === 'string' ? Date.parse(t) : t)) / 1000); return s < 60 ? `${Math.max(s, 0)} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h` }
+const hora = t => t ? new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
+const quando = t => t ? new Date(t).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+const tokens = v => { const n = num(v); return n >= 1e6 ? `${(n / 1e6).toFixed(1).replace('.', ',')} M` : n >= 1e3 ? `${Math.round(n / 1e3)} k` : String(n) }
+const curto = t => String(t ?? '').replace(/^(F\d+|M\d+|correção [\d.]+)\s/, '$1 · ')
+
+const SVG = {
+  feita: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#3fb27f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-label="feita"><path d="M20 6 9 17l-5-5"/></svg>',
+  rodando: '<svg class="ico gira" viewBox="0 0 24 24" fill="none" stroke="#8fb4ff" stroke-width="2.5" stroke-linecap="round" aria-label="rodando"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg>',
+  parou: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#f06a6a" stroke-width="2.5" stroke-linecap="round" aria-label="parou"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>',
+  pendente: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#5d6776" stroke-width="2" aria-label="pendente"><circle cx="12" cy="12" r="8"/></svg>',
+  bash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-5-6-5M12 19h8"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  read: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>',
+  busca: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
+  fim: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  outro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+  tarefa: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+}
+const tipoIcone = n => ['Bash', 'PowerShell'].includes(n) ? ['bash', 'i-bash'] : ['Edit', 'Write', 'NotebookEdit'].includes(n) ? ['edit', 'i-edit']
+  : n === 'Read' ? ['read', 'i-read'] : ['Grep', 'Glob'].includes(n) ? ['busca', 'i-busca'] : n === 'StructuredOutput' ? ['fim', 'i-fim'] : ['outro', '']
 
 let selecionada = location.hash.slice(1) || null
-const abertos = new Set(JSON.parse(sessionStorage.getItem('abertos') ?? '[]'))
+let missaoAtual = null
+const abertos = new Set((() => { try { return JSON.parse(sessionStorage.getItem('abertos') ?? '[]') } catch { return [] } })())
 const lembrar = () => { try { sessionStorage.setItem('abertos', JSON.stringify([...abertos])) } catch {} }
 document.addEventListener('toggle', e => {
   const id = e.target.dataset?.id
-  if (!id) return
-  e.target.open ? abertos.add(id) : abertos.delete(id)
+  if (!id || !e.isTrusted) return
+  if (id.startsWith('p:')) { e.target.open ? abertosFeed.add(id) : abertosFeed.delete(id); return }
+  if (e.target.open) { abertos.add(id); abertos.delete(`fechado:${id}`) } else { abertos.delete(id); if (e.target.dataset.padrao) abertos.add(`fechado:${id}`) }
   lembrar()
 }, true)
+const abertosFeed = new Set()
+const aberto = (id, padrao = false) => abertosFeed.has(id) || abertos.has(id) || (padrao && !abertos.has(`fechado:${id}`))
 
-function renderLista(ms) {
-  $('#lista').innerHTML = ms.map(m => {
-    const pct = m.progresso.total ? Math.round(100 * m.progresso.feitas / m.progresso.total) : 0
-    return `<button class="item ${m.id === selecionada ? 'ativo' : ''}" data-missao="${m.id}">
-      <div class="topo"><span class="nome">${esc(m.projeto)}</span>${selo(m.estado)}</div>
-      <div class="sub">${esc(m.milestoneAtual ?? m.milestones.at(-2)?.titulo ?? '')}</div>
-      <div class="sub">${num(m.progresso.feitas)}/${num(m.progresso.total)} features · início ${quando(m.inicio)}</div>
-      <div class="barra"><div style="width:${pct}%"></div></div>
-    </button>`
-  }).join('') || '<div class="vazio">Nenhuma missão.</div>'
-  for (const b of document.querySelectorAll('[data-missao]')) b.onclick = () => { selecionada = b.dataset.missao; location.hash = selecionada; atualizar() }
+// ---------- limites ----------
+function renderLimites(l) {
+  if (!l) { $('#limites').innerHTML = '<span class="suave" style="font-size:12px">Limites: aguardando a primeira leitura</span>'; return }
+  const zera = ms => { if (!ms) return ''; const d = new Date(num(ms)); return new Date().toDateString() === d.toDateString() ? `hoje ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : d.toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) }
+  const barra = (nome, j) => {
+    if (!j) return ''
+    const u = Math.max(0, Math.min(100, num(j.usado)))
+    const c = u >= 95 ? 'critico' : u >= 80 ? 'alerta' : ''
+    return `<div class="limite"><div class="rot"><span>${esc(nome)}</span><span>zera ${esc(zera(j.zeraEm))}</span></div><div class="medidor ${c}"><div style="width:${u}%"></div></div><b>${Math.round(u)}%</b></div>`
+  }
+  const velho = Date.now() - num(l.lidoEm) > 30 * 60 * 1000
+  $('#limites').innerHTML = barra('Janela de 5 h', l.cincoHoras) + barra('Semanal', l.semanal) +
+    (velho ? `<span class="suave" style="font-size:12px">leitura de ${esc(ha(num(l.lidoEm)))} atrás</span>` : '')
 }
 
-function renderFeature(f, prefixo) {
-  const id = `${prefixo}:${f.execucao ?? ""}:${f.titulo}`
-  const direita = f.estado === 'feita' ? (f.commit ? `<span class="mono">${esc(f.commit.slice(0, 9))}</span>` : '<span class="conta">sem commit registrado</span>')
-    : f.etapa ? `<span class="selo s-rodando">${esc(f.etapa)}</span>` : ''
-  const ajustes = [
-    num(f.rodadasAjuste) ? `<span class="conta">${num(f.rodadasAjuste)} ajuste${num(f.rodadasAjuste) > 1 ? 's' : ''}</span>` : '',
-    num(f.quedas) ? `<span class="conta">${num(f.quedas)} queda(s) do agente</span>` : '',
-    f.execucao > 1 ? `<span class="conta">execução ${num(f.execucao)}</span>` : '',
+// ---------- lista ----------
+function renderLista(ms) {
+  const item = m => {
+    const pct = m.progresso.total ? Math.round(100 * m.progresso.feitas / m.progresso.total) : 0
+    return `<button class="missao ${m.id === selecionada ? 'ativa' : ''}" data-missao="${esc(m.id)}">
+      <span class="topo"><span>${esc(m.projeto)}</span><span class="suave" style="font-size:12px">${num(m.progresso.feitas)}/${num(m.progresso.total)}</span></span>
+      <span class="sub">${esc(m.milestoneAtual ?? (m.estado === 'concluida' ? 'concluída' : 'parada'))} · ${esc(quando(m.inicio))}</span>
+      <span class="fina"><div style="width:${pct}%"></div></span></button>`
+  }
+  const ativas = ms.filter(m => m.estado === 'rodando'), outras = ms.filter(m => m.estado !== 'rodando')
+  $('#lista').innerHTML = (ativas.length ? '<div class="grupo">Em andamento</div>' + ativas.map(item).join('') : '') +
+    (outras.length ? '<div class="grupo">Paradas e concluídas</div>' + outras.map(item).join('') : '') || '<div class="vazio">Nenhuma missão.</div>'
+  for (const b of document.querySelectorAll('[data-missao]')) b.onclick = () => { selecionada = b.dataset.missao; location.hash = selecionada; vivo.ref = null; vivo.seguir = true; atualizar() }
+}
+
+// ---------- detalhe ----------
+const estadoTrilha = e => e === 'validado' ? 't-validado' : e === 'pendente' ? 't-pendente' : e === 'parou' ? 't-parou' : 't-andamento'
+const rotuloAgente = c => c.tipo === 'revisao' ? 'revisão' : c.tipo === 'commit' ? 'commit' : c.tipo === 'ajuste' ? `ajuste ${c.rodada ?? ''}` : 'implementação'
+function renderFeature(f, prefixo, padraoAberto) {
+  const id = `${prefixo}:${f.execucao ?? ''}:${f.titulo}`
+  const icone = SVG[f.estado] ?? SVG.pendente
+  const direita = f.estado === 'feita' ? `<span class="mono sha">${f.commit ? esc(f.commit.slice(0, 7)) : '—'}</span>` : f.etapa ? selo('rodando', f.etapa) : f.estado === 'parou' ? selo('parou') : ''
+  const meta = [num(f.rodadasAjuste) ? `${num(f.rodadasAjuste)} ajuste${num(f.rodadasAjuste) > 1 ? 's' : ''}` : '', num(f.quedas) ? `${num(f.quedas)} queda(s)` : '', f.duracaoMs ? duracao(f.duracaoMs) : ''].filter(Boolean).join(' · ')
+  const probs = f.revisao?.problemas ?? []
+  const dentro = [
+    f.chamadas?.length ? `<div><div class="rotulo suave" style="margin-bottom:6px">Agentes · clique para ver ao vivo</div><div class="chips">${f.chamadas.map(c => `<button class="chip ${vivo.ref === c.ref ? 'on' : ''}" data-ref="${esc(c.ref)}" data-label="${esc(c.label)}">${esc(rotuloAgente(c))}</button>`).join('')}</div></div>` : '<div class="suave">Ainda não começou.</div>',
+    probs.length ? `<div><div class="rotulo suave" style="margin-bottom:6px">Última revisão · ${f.revisao.aprovado ? 'aprovada' : `${probs.length} apontamento(s)`}</div>${probs.map(p => `<div class="apont"><span class="tag">${f.revisao.aprovado ? 'nota' : 'achado'}</span><span>${esc(p.problema ?? JSON.stringify(p))}</span></div>`).join('')}</div>` : f.revisao?.aprovado ? '<div>Revisão independente aprovada.</div>' : '',
+    f.semCommitRegistrado ? '<div class="suave">Concluída sem commit registrado pela missão; o milestone foi validado.</div>' : '',
+    f.motivoCommit && f.estado !== 'feita' ? `<div><div class="rotulo suave">Commit recusado</div><pre>${esc(f.motivoCommit)}</pre></div>` : '',
+    f.resumo ? `<details class="bloco" data-id="${esc(`${id}:resumo`)}" ${aberto(`${id}:resumo`) ? 'open' : ''}><summary class="suave">Resumo do agente ▸</summary><pre style="margin-top:6px">${esc(f.resumo)}</pre></details>` : '',
   ].join('')
-  const probs = f.revisao && !f.revisao.aprovado ? f.revisao.problemas : []
-  const corpo = [
-    f.resumo ? `<div><b>Resumo do agente</b><pre>${esc(f.resumo)}</pre></div>` : '',
-    probs.length ? `<div><b>Última revisão: ${probs.length} apontamento(s)</b>${probs.map(p => `<div class="problema">${esc(p.problema ?? JSON.stringify(p))}</div>`).join('')}</div>` : '',
-    f.revisao?.aprovado ? '<div>Revisão independente: aprovada.</div>' : '',
-    f.motivoCommit && f.estado !== 'feita' ? `<div><b>Commit recusado</b><pre>${esc(f.motivoCommit)}</pre></div>` : '',
-    f.semCommitRegistrado ? '<div>Concluída sem commit registrado pela missão (commit manual ou já resolvida); o milestone foi validado.</div>' : '',
-    f.agentes ? `<div>${num(f.agentes)} agentes · ${tempo(f.duracaoMs)} · ${tokens(f.tokens)} tokens</div>` : '<div>Ainda não começou.</div>',
-  ].join('')
-  return `<details class="feat" data-id="${esc(id)}" ${abertos.has(id) ? 'open' : ''}>
-    <summary><span class="icone">${ICONES[f.estado] ?? '○'}</span><span class="t">${esc(f.titulo)}</span>${ajustes}${direita}</summary>
-    <div class="corpo">${corpo}</div></details>`
+  return `<details class="feat" data-id="${esc(id)}" ${padraoAberto ? 'data-padrao="1"' : ''} ${aberto(id, padraoAberto) ? 'open' : ''}>
+    <summary>${icone}<span class="t">${esc(curto(f.titulo))}</span><span class="meta">${esc(meta)}</span>${direita}</summary>
+    <div class="dentro">${dentro}</div></details>`
+}
+
+function esqueleto(m) {
+  $('#detalhe').dataset.missao = m.id
+  $('#detalhe').innerHTML = `
+    <section class="hero"><div class="esq"><div class="titulo"><h1 id="h-proj"></h1><span id="h-selo"></span><span class="mono suave" id="h-base"></span></div><div class="grande" id="h-grande"></div></div><div class="metricas" id="h-metricas"></div></section>
+    <section aria-label="Milestones"><div class="trilha" id="trilha"></div><div class="legenda"><span><i style="background:var(--verde-f)"></i>validado</span><span><i style="background:var(--azul-f)"></i>em andamento</span><span><i style="background:var(--cartao);border:1px solid #2a313c"></i>pendente</span></div></section>
+    <div class="grade"><div class="col"><div id="agora"></div>
+      <section class="cartao vivo"><div class="cab"><div class="quem"><span class="rotulo" style="color:var(--azul)">Ao vivo</span><b id="vivo-quem">—</b></div><div style="display:flex;gap:8px"><button class="botao" id="vivo-tarefa">Tarefa</button><button class="botao on" id="vivo-seguir">Seguindo o atual</button></div></div><div class="feed" id="feed" aria-live="polite"></div></section>
+      <div id="ms-atual"></div><div id="ms-lista"></div></div>
+    <aside class="col"><section class="cartao"><div class="cab"><h2>Atividade</h2><span class="suave" style="font-size:12px">clique para ver ao vivo</span></div><div class="ativ" id="ativ"></div></section>
+      <section class="cartao"><div class="cab"><h2>Commits</h2><span class="suave" style="font-size:12px" id="n-commits"></span></div><div class="commits" id="commits"></div></section>
+      <section class="cartao"><details class="bloco" data-id="skills" ${aberto('skills') ? 'open' : ''}><summary class="cab" style="border-bottom:0"><h2>Skills da missão</h2><span class="suave" style="font-size:12px" id="n-skills"></span></summary><div id="skills"></div></details></section></aside></div>`
+  $('#vivo-seguir').onclick = () => { vivo.seguir = !vivo.seguir; if (vivo.seguir && missaoAtual?.agora) abrirVivo(missaoAtual.agora.ref, missaoAtual.agora.label); pintarSeguir() }
+  $('#vivo-tarefa').onclick = () => { vivo.mostrarTarefa = !vivo.mostrarTarefa; $('#vivo-tarefa').classList.toggle('on', vivo.mostrarTarefa); desenharFeed(false) }
+  pintarSeguir()
+  vivo.passos = []; vivo.total = 0; vivo.ref = null; vivo.geracao++
 }
 
 function renderDetalhe(m) {
+  missaoAtual = m
+  if (!$('#feed') || $('#detalhe').dataset.missao !== m.id) esqueleto(m)
   const pct = m.progresso.total ? Math.round(100 * m.progresso.feitas / m.progresso.total) : 0
-  const duracao = (m.estado === 'rodando' ? Date.now() : m.ultimaAtividade) - Date.parse(m.inicio)
-  const agora = m.estado === 'rodando'
-    ? `<div class="agora"><b>Agora:</b> ${esc(m.atual ?? 'entre etapas')}</div>`
-    : m.estado === 'parada'
-      ? `<div class="agora parada"><b>Parada.</b> Último evento: ${esc(m.ultimoEvento?.label ?? '')}${m.ultimoEvento?.resumo ? ` — ${esc(m.ultimoEvento.resumo)}` : ''}. Sem atividade ${ha(m.ultimaAtividade)}.</div>`
-      : '<div class="agora"><b>Missão concluída.</b></div>'
-  const milestones = m.milestones.map((ms, i) => {
-    const id = `ms:${ms.titulo}`
-    const feitas = ms.features.filter(f => f.estado === 'feita').length
-    const aberto = abertos.has(id) || (!abertos.has(`fechado:${id}`) && ['rodando', 'validando', 'corrigindo', 'parou'].includes(ms.estado))
-    const valid = ms.validacoes.length ? `<div class="validacoes"><span class="conta">validação:</span>${ms.validacoes.slice(-4).map(v => `<span class="selo s-${esc(v.estado)}">${esc(v.label.split(':')[0])} · ${esc(NOMES[v.estado] ?? v.estado)}</span>`).join('')}</div>` : ''
-    const probs = ms.problemasValidacao?.length ? `<div class="corpo"><b>Problemas da validação</b>${ms.problemasValidacao.map(p => `<div class="problema">${esc(p.problema ?? '')}</div>`).join('')}</div>` : ''
-    const correcoes = ms.correcoes.length ? `<div class="feats"><div class="corpo" style="padding-top:8px"><b>Correções</b></div>${ms.correcoes.map(f => renderFeature(f, `c${i}`)).join('')}</div>` : ''
-    return `<details class="ms" data-id="${esc(id)}" ${aberto ? 'open' : ''}>
-      <summary><span class="icone">${ICONES[ms.estado] ?? '○'}</span><span class="ms-titulo">${esc(ms.titulo)}</span>
-        ${num(ms.rodadasCorrecao) ? `<span class="conta">${num(ms.rodadasCorrecao)} rodada(s) de correção</span>` : ''}
-        ${ms.features.length ? `<span class="conta">${feitas}/${ms.features.length}</span>` : ''}${selo(ms.estado)}</summary>
-      ${ms.features.length ? `<div class="feats">${ms.features.map(f => renderFeature(f, `f${i}`)).join('')}</div>` : ''}
-      ${correcoes}${valid}${probs}</details>`
+  const decorrido = (m.estado === 'rodando' ? Date.now() : m.ultimaAtividade) - Date.parse(m.inicio)
+  const porFeature = m.progresso.feitas ? decorrido / m.progresso.feitas : 0
+  const faltam = m.progresso.total - m.progresso.feitas
+  const estimativa = m.estado === 'concluida' ? { v: 'concluída', r: `em ${duracao(decorrido)}` }
+    : porFeature && faltam ? { v: `≈ ${duracao(porFeature * faltam)}`, r: `restantes · ${duracao(porFeature)}/feature` } : { v: '—', r: 'estimativa após a 1ª feature' }
+
+  $('#h-proj').textContent = m.projeto
+  $('#h-selo').innerHTML = selo(m.estado)
+  $('#h-base').textContent = `${m.branch ?? ''} · base ${(m.base ?? '').slice(0, 9)}`
+  $('#h-grande').innerHTML = `${num(m.progresso.feitas)}<span> / ${num(m.progresso.total)}</span> <span style="font-size:15px;font-weight:400;letter-spacing:0;color:var(--suave)">features · ${pct}%</span>`
+  $('#h-metricas').innerHTML = [
+    { v: duracao(decorrido), r: `desde ${quando(m.inicio)}` }, estimativa,
+    { v: String(num(m.agentes)), r: `agentes em ${m.execucoes.length} execução(ões)` }, { v: tokens(m.tokensSaida), r: `tokens gerados · ${tokens(m.tokens)} processados` },
+  ].map(x => `<div class="metrica"><div class="v">${esc(x.v)}</div><div class="r">${esc(x.r)}</div></div>`).join('')
+  $('#trilha').innerHTML = m.milestones.map(x => {
+    const feitas = x.features.filter(f => f.estado === 'feita').length
+    const id = x.suite ? 'Suíte' : (x.titulo.match(/^\S+/) ?? [x.titulo])[0]
+    return `<div class="${estadoTrilha(x.estado)}" style="flex-grow:${Math.max(x.features.length, 2)}" title="${esc(x.titulo)}"><b>${esc(id)}</b><span>${x.features.length ? `${feitas}/${x.features.length}` : ''}</span></div>`
   }).join('')
-  const commits = m.commits?.length ? `<table>${m.commits.map(c => `<tr><td class="n mono">${esc(c.sha)}</td><td>${esc(c.assunto)}</td><td class="n">${quando(c.data)}</td></tr>`).join('')}</table>` : '<div class="conta">Nenhum commit ainda.</div>'
-  const tl = `<table>${m.linhaDoTempo.map(c => `<tr><td class="n">${quando(c.inicio)}</td><td>${esc(c.label)}${c.resumo ? `<div class="conta">${esc(c.resumo)}</div>` : ''}</td><td class="n">${tempo(c.duracaoMs)}</td><td>${selo(c.estado)}</td></tr>`).join('')}</table>`
-  const skills = m.skills.map(s => `<details class="feat" data-id="sk:${esc(s.nome)}" ${abertos.has(`sk:${s.nome}`) ? 'open' : ''}><summary><span class="t">${esc(s.nome)}</span><span class="conta">${s.features.length} features</span></summary><div class="corpo"><pre>${esc(s.guia)}</pre></div></details>`).join('')
-  $('#detalhe').innerHTML = `
-    <div class="cartao">
-      <div class="cab"><h2>${esc(m.projeto)}</h2>${selo(m.estado)}<span class="conta mono">${esc(m.branch ?? '')} · base ${esc((m.base ?? '').slice(0, 9))}</span></div>
-      <div class="barra" style="height:10px"><div style="width:${pct}%"></div></div>
-      <div class="metricas">
-        <div class="metrica"><div class="v">${num(m.progresso.feitas)}/${num(m.progresso.total)}</div><div class="r">features feitas</div></div>
-        <div class="metrica"><div class="v">${tempo(duracao)}</div><div class="r">desde ${quando(m.inicio)}</div></div>
-        <div class="metrica"><div class="v">${num(m.agentes)}</div><div class="r">agentes em ${m.execucoes.length} execução(ões)</div></div>
-        <div class="metrica"><div class="v">${tokens(m.tokensSaida)}</div><div class="r">tokens gerados (${tokens(m.tokens)} processados)</div></div>
-        <div class="metrica"><div class="v">${ha(m.ultimaAtividade)}</div><div class="r">última atividade</div></div>
-      </div>
-      ${agora}
-    </div>
-    <div class="cartao"><h3>Milestones</h3>${milestones}</div>
-    <div class="cartao"><details data-id="commits" ${abertos.has('commits') ? 'open' : ''}><summary><h3 style="display:inline">Commits (${m.commits?.length ?? 0})</h3></summary>${commits}</details></div>
-    <div class="cartao"><details data-id="tl" ${abertos.has('tl') ? 'open' : ''}><summary><h3 style="display:inline">Últimos agentes</h3></summary>${tl}</details></div>
-    <div class="cartao"><details data-id="skills" ${abertos.has('skills') ? 'open' : ''}><summary><h3 style="display:inline">Skills da missão (${m.skills.length})</h3></summary>${skills}</details></div>`
-  for (const d of document.querySelectorAll('details.ms')) d.addEventListener('toggle', () => { if (!d.open) abertos.add(`fechado:${d.dataset.id}`); else abertos.delete(`fechado:${d.dataset.id}`); lembrar() })
+
+  const f = m.featureAtual
+  const legenda = p => p.estado === 'agora' ? 'em curso' : p.estado === 'feita' ? (p.vezes > 1 ? `feita · ${p.vezes} vezes` : 'feita') : p.estado === 'pulada' ? 'não precisou' : p.estado === 'parou' ? 'parou' : 'aguardando'
+  $('#agora').innerHTML = m.estado === 'rodando' && f
+    ? `<section class="agora"><div class="linha"><div><div class="rotulo" style="color:var(--azul)">Agora</div><div class="nome">${esc(curto(f.titulo))}</div></div><span class="suave" style="font-size:13px">${esc((f.milestone.match(/^\S+/) ?? [''])[0])} · há ${esc(ha(m.agora?.inicio))}</span></div>
+      <ol class="etapas">${f.pipeline.map(p => `<li class="e-${CLASSES.has(p.estado) ? p.estado : 'pendente'}">${esc(p.nome)}<span>${esc(legenda(p))}</span></li>`).join('')}</ol></section>`
+    : m.estado === 'rodando' ? `<section class="agora"><div class="rotulo" style="color:var(--azul)">Agora</div><div class="nome">${esc(m.atual ?? 'entre etapas')}</div></section>`
+      : m.estado === 'parada' ? `<section class="agora parada"><div class="rotulo" style="color:var(--vermelho)">Parada</div><div>Último evento: ${esc(m.ultimoEvento?.label ?? '')}${m.ultimoEvento?.resumo ? ` — ${esc(m.ultimoEvento.resumo)}` : ''}. Sem atividade há ${esc(ha(m.ultimaAtividade))}.</div></section>`
+        : '<section class="agora concluida"><div class="rotulo" style="color:var(--verde-t)">Missão concluída</div><div>Todas as features commitadas e a suíte final aprovada.</div></section>'
+
+  const msAtual = m.milestones.find(x => !['validado', 'pendente'].includes(x.estado)) ?? null
+  $('#ms-atual').innerHTML = msAtual ? `<section class="cartao"><div class="cab"><h2>${esc(curto(msAtual.titulo))}</h2><span class="suave" style="font-size:13px">${msAtual.features.filter(x => x.estado === 'feita').length} de ${msAtual.features.length}${num(msAtual.rodadasCorrecao) ? ` · ${num(msAtual.rodadasCorrecao)} rodada(s) de correção` : ''} · ${esc(NOMES[msAtual.estado] ?? msAtual.estado)}</span></div>
+      ${msAtual.features.map(x => renderFeature(x, 'atual', x.estado === 'rodando')).join('')}
+      ${msAtual.correcoes.length ? `<div class="cab" style="border-top:1px solid var(--linha)"><h2 style="font-size:13px">Correções</h2></div>${msAtual.correcoes.map(x => renderFeature(x, 'corr', x.estado === 'rodando')).join('')}` : ''}
+      ${msAtual.validacoes.length ? `<div class="probs"><div class="chips">${msAtual.validacoes.slice(-4).map(v => selo(v.estado, `${v.label.split(':')[0]} · ${NOMES[v.estado] ?? v.estado}`)).join('')}</div>${(msAtual.problemasValidacao ?? []).map(p => `<div class="apont"><span class="tag">validação</span><span>${esc(p.problema ?? '')}</span></div>`).join('')}</div>` : ''}
+    </section>` : ''
+  const outros = m.milestones.filter(x => x !== msAtual)
+  const iconeMs = e => SVG[e === 'validado' ? 'feita' : e === 'pendente' ? 'pendente' : e === 'parou' ? 'parou' : 'rodando']
+  $('#ms-lista').innerHTML = `<section class="cartao"><div class="cab"><h2>Todos os milestones</h2><span class="suave" style="font-size:13px">${m.milestones.filter(x => x.estado === 'validado').length} validados</span></div>
+    ${outros.map((x, i) => `<details class="ms" data-id="ms:${esc(x.titulo)}" ${aberto(`ms:${x.titulo}`) ? 'open' : ''}><summary>${iconeMs(x.estado)}<span class="t">${esc(curto(x.titulo))}</span><span class="suave" style="font-size:12px">${x.features.length ? `${x.features.filter(y => y.estado === 'feita').length}/${x.features.length}` : ''}</span></summary>
+      ${x.features.map(y => renderFeature(y, `o${i}`, false)).join('')}${x.correcoes.map(y => renderFeature(y, `oc${i}`, false)).join('')}</details>`).join('')}</section>`
+
+  const pontoCor = e => e === 'rodando' ? 'var(--azul)' : e === 'ok' ? 'var(--verde)' : e === 'caiu' || e === 'interrompido' ? 'var(--vermelho)' : 'var(--suave)'
+  $('#ativ').innerHTML = m.linhaDoTempo.slice(0, 12).map(c => `<button data-ref="${esc(c.ref)}" data-label="${esc(c.label)}"><span class="ponto" style="background:${pontoCor(c.estado)}"></span><span class="txt"><b>${esc(curto(c.label))}</b><span>${esc(c.estado === 'rodando' ? 'rodando agora' : c.resumo ?? NOMES[c.estado] ?? '')}${c.duracaoMs ? ` · ${esc(duracao(c.duracaoMs))}` : ''}</span></span><span class="qdo">${esc(c.inicio ? ha(c.inicio) : '')}</span></button>`).join('')
+  $('#commits').innerHTML = m.commits?.length ? m.commits.slice(0, 8).map(c => `<div><span class="mono" style="color:var(--azul)">${esc(c.sha)}</span><span title="${esc(c.assunto)}">${esc(c.assunto)}</span></div>`).join('') : '<div class="suave">Nenhum commit ainda.</div>'
+  $('#n-commits').textContent = m.commits?.length ? `${m.commits.length} no intervalo` : ''
+  $('#skills').innerHTML = m.skills.map(s => `<div class="skill"><details class="bloco" data-id="sk:${esc(s.nome)}" ${aberto(`sk:${s.nome}`) ? 'open' : ''}><summary><b style="font-weight:500">${esc(s.nome)}</b> <span class="suave" style="font-size:12px">· ${s.features.length} features</span></summary><pre>${esc(s.guia)}</pre></details></div>`).join('')
+  $('#n-skills').textContent = String(m.skills.length)
+  for (const b of document.querySelectorAll('#detalhe [data-ref]')) b.onclick = e => { e.preventDefault(); vivo.seguir = false; pintarSeguir(); abrirVivo(b.dataset.ref, b.dataset.label) }
+  if (vivo.seguir && m.agora && m.agora.ref !== vivo.ref) abrirVivo(m.agora.ref, m.agora.label)
+  else if (!vivo.ref && m.linhaDoTempo[0]) abrirVivo(m.linhaDoTempo[0].ref, m.linhaDoTempo[0].label)
 }
 
-// Limites da assinatura: vêm da statusline do Claude Code, que só roda com uma sessão aberta no terminal.
-const zera = ms => {
-  if (!ms) return ''
-  const d = new Date(ms)
-  const hoje = new Date().toDateString() === d.toDateString()
-  return hoje ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+// ---------- ao vivo ----------
+const vivo = { geracao: 0, ref: null, label: '', passos: [], total: 0, seguir: true, mostrarTarefa: false, carregando: false }
+function pintarSeguir() { const b = $('#vivo-seguir'); if (b) { b.classList.toggle('on', vivo.seguir); b.textContent = vivo.seguir ? 'Seguindo o atual' : 'Seguir o atual' } }
+function abrirVivo(ref, label) {
+  if (ref !== vivo.ref) { vivo.passos = []; vivo.total = 0; vivo.geracao++ }
+  vivo.ref = ref; vivo.label = label
+  const q = $('#vivo-quem'); if (q) q.textContent = curto(label)
+  for (const c of document.querySelectorAll('.chip[data-ref]')) c.classList.toggle('on', c.dataset.ref === ref)
+  desenharFeed(true)
+  buscarPassos()
 }
-function renderLimites(l) {
-  if (!l) {
-    $('#limites').innerHTML = '<span>Limites: sem leitura ainda. Abra o Claude Code no terminal.</span>'
-    return
-  }
-  const barra = (nome, j) => {
-    if (!j) return ''
-    const usado = Math.max(0, Math.min(100, num(j.usado)))
-    const classe = usado >= 95 ? 'critico' : usado >= 80 ? 'alerta' : ''
-    return `<span class="limite" title="zera ${esc(zera(j.zeraEm))}">${esc(nome)} <span class="mini ${classe}"><div style="width:${usado}%"></div></span><b>${Math.round(usado)}%</b> <span>zera ${esc(zera(j.zeraEm))}</span></span>`
-  }
-  const velho = Date.now() - num(l.lidoEm) > 30 * 60 * 1000
-  $('#limites').innerHTML = barra('5h', l.cincoHoras) + barra('Semana', l.semanal) +
-    (velho ? `<span title="A statusline só atualiza com uma sessão do Claude Code aberta no terminal.">leitura ${esc(ha(num(l.lidoEm)))}</span>` : '')
+async function buscarPassos() {
+  if (!vivo.ref || vivo.carregando) return
+  vivo.carregando = true
+  const ref = vivo.ref, geracao = vivo.geracao, desde = vivo.total
+  try {
+    const d = await (await fetch(`/api/passos/${ref}?desde=${desde}`)).json()
+    // Troca de agente (mesmo voltando ao anterior) muda a geração: resposta antiga é descartada.
+    if (geracao !== vivo.geracao || ref !== vivo.ref || desde !== vivo.total || !Array.isArray(d.passos)) return
+    if (num(d.total) < vivo.total) { vivo.passos = []; vivo.total = 0; desenharFeed(true); return }
+    if (d.passos.length) { vivo.passos.push(...d.passos); vivo.total = num(d.total); desenharFeed(false) }
+  } catch {} finally { vivo.carregando = false }
+}
+function desenharFeed(forcarFim) {
+  const feed = $('#feed'); if (!feed) return
+  const noFim = forcarFim || feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60
+  const resultados = new Map(vivo.passos.filter(p => p.tipo === 'resultado').map(p => [p.id, p]))
+  const html = vivo.passos.map((p, i) => {
+    if (p.tipo === 'tarefa') return vivo.mostrarTarefa ? `<div class="passo"><span class="ic">${SVG.tarefa}</span><div class="cont"><div class="lin"><b class="res">Tarefa recebida</b><span class="h">${esc(hora(p.quando))}</span></div><pre>${esc(p.texto)}</pre></div></div>` : ''
+    if (p.tipo === 'texto') return `<div class="passo texto"><span class="ic">${SVG.outro}</span><div class="cont">${esc(p.texto)}</div></div>`
+    if (p.tipo === 'pensou') return '<div class="passo pensou">pensou…</div>'
+    if (p.tipo !== 'ferramenta') return ''
+    const r = resultados.get(p.id)
+    const [ic, cl] = tipoIcone(p.nome)
+    const id = `p:${vivo.ref}:${i}`
+    const saida = r ? `<div class="saida ${r.erro ? 'erro' : ''}">${esc((String(r.texto).split('\n').find(l => l.trim()) ?? '(sem saída)').slice(0, 200))}</div>` : '<div class="saida">rodando…</div>'
+    const corpo = [p.detalhe && p.detalhe !== p.resumo ? `<pre>${esc(p.detalhe)}</pre>` : '', r ? `<pre${r.erro ? ' style="color:var(--vermelho)"' : ''}>${esc(r.texto || '(sem saída)')}</pre>` : ''].join('')
+    return `<div class="passo"><span class="ic ${cl}">${SVG[ic]}</span><div class="cont"><details class="bloco" data-id="${esc(id)}" ${aberto(id) ? 'open' : ''}><summary><div class="lin"><span class="mono" style="color:var(--suave)">${esc(p.nome)}</span><span class="res">${esc(p.resumo ?? '')}</span><span class="h">${esc(hora(p.quando))}</span></div>${saida}</summary>${corpo}</details></div></div>`
+  }).join('')
+  feed.innerHTML = html || '<div class="suave" style="padding:20px">Sem passos ainda.</div>'
+  if (noFim) feed.scrollTop = feed.scrollHeight
 }
 
+// ---------- ciclo ----------
 async function atualizar() {
   fetch('/api/limites').then(r => r.json()).then(d => renderLimites(d.limites)).catch(() => {})
   try {
     const ms = await (await fetch('/api/missoes')).json()
     if (!selecionada || !ms.some(m => m.id === selecionada)) selecionada = (ms.find(m => m.estado === 'rodando') ?? ms[0])?.id ?? null
     renderLista(ms)
-    if (selecionada) {
-      const y = window.scrollY
-      renderDetalhe(await (await fetch(`/api/missoes/${selecionada}`)).json())
-      window.scrollTo(0, y)
-    }
+    if (selecionada) renderDetalhe(await (await fetch(`/api/missoes/${selecionada}`)).json())
     $('#atualizado').textContent = `atualizado ${new Date().toLocaleTimeString('pt-BR')}`
-    $('#pulso').style.background = 'var(--verde)'
+    $('#pulso').classList.remove('erro')
   } catch {
     $('#atualizado').textContent = 'sem conexão com o servidor do painel'
-    $('#pulso').style.background = 'var(--vermelho)'
+    $('#pulso').classList.add('erro')
   }
 }
 atualizar()
 setInterval(atualizar, 5000)
+setInterval(buscarPassos, 2000)
 </script>
 </body>
 </html>
