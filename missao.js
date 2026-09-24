@@ -129,6 +129,7 @@ const RESULTADO_COMMIT = {
     commitado: { type: 'boolean' },
     commit: { type: 'string' },
     gateFalhou: { type: 'boolean' },
+    recusado: { type: 'boolean' },
     foraDaLista: { type: 'array', items: { type: 'string' } },
     motivo: { type: 'string' },
   },
@@ -320,6 +321,7 @@ function promptTrabalho(f, extra) {
 
 // Commit só depois da revisão aprovada; este agente nunca altera código.
 // Se cair depois de commitar, o commit é adotado apenas se for o único e tiver exatamente os arquivos da feature.
+// Devolve { commit, parar? }, { apontamento } ou { erro }. parar: motivo para parar logo depois do commit.
 async function commitar(f, arquivos, fase, antes) {
   const chamar = () => agent(
     `Faça UM commit atômico da feature "${f.titulo}", já revisada e aprovada. Arquivos da feature: ${[...arquivos].join(', ')}.\n` +
@@ -333,6 +335,9 @@ async function commitar(f, arquivos, fase, antes) {
     '`log=$(mktemp); git commit -F <arquivo> -- <paths> > "$log" 2>&1; echo "saida=$?"; tail -40 "$log"`;\n' +
     '- você NÃO altera código em hipótese alguma: se um gate do commit falhar, não corrija; devolva commitado=false, ' +
     'gateFalhou=true e a saída relevante em motivo;\n' +
+    '- se o harness ou o classificador de permissões recusar uma ferramenta ou um comando, não tente de outro jeito ' +
+    '(outro comando, outra ferramenta, outro caminho): pare e devolva recusado=true, o texto da recusa em motivo e ' +
+    'commitado=false, ou commitado=true com o SHA se o commit já tinha sido feito. Recusa exige decisão humana;\n' +
     '- devolva o SHA completo (`git rev-parse HEAD`).\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO,
     { label: `commit: ${f.titulo}`, phase: fase, schema: RESULTADO_COMMIT, effort: 'low' },
   )
@@ -350,7 +355,13 @@ async function commitar(f, arquivos, fase, antes) {
     r = await chamar()
   }
   if (!r) return { erro: `agente de commit não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas` }
-  if (r.commitado && r.commit) return { commit: r.commit }
+  const feito = r.commitado && r.commit ? r.commit : null
+  // Recusa contornada não se resolve com ajuste: a decisão é humana.
+  const parar = r.recusado
+    ? `o harness recusou um comando do agente de commit, e a missão não contorna recusa: ${r.motivo ?? 'sem texto'}`
+    : null
+  if (parar) return feito ? { commit: feito, parar } : { erro: `${parar}. Decida à mão, conferindo \`git status\` e \`git log\`` }
+  if (feito) return { commit: feito }
   if (r.gateFalhou) return { apontamento: `gate do commit falhou: ${r.motivo ?? 'sem saída'}` }
   if (r.foraDaLista?.length) {
     return { apontamento: `mudanças fora da lista da feature: ${r.foraDaLista.join(', ')}. Se forem desta feature, ` +
@@ -408,6 +419,7 @@ async function implementar(features, fase) {
     let anteriores = []
     let rodada = 0
     let commit = null
+    let pararDepois = null
     while (!commit) {
       const memoria = anteriores.length
         ? `\nNa rodada anterior foram apontados: ${anteriores.join(' | ')}. Confirme se foram resolvidos.`
@@ -423,7 +435,7 @@ async function implementar(features, fase) {
       let problemas
       if (rev.aprovado) {
         const c = await commitar(f, arquivos, fase, antes)
-        if (c.commit) { commit = c.commit; break }
+        if (c.commit) { commit = c.commit; pararDepois = c.parar; break }
         if (c.erro) return falhou(c.erro + '.' + sujo)
         problemas = [c.apontamento]
       } else {
@@ -451,6 +463,7 @@ async function implementar(features, fase) {
     head = commit
     commits.push(commit)
     resultados.push({ feature: f.titulo, ...r, commit, rodadasRevisao: rodada })
+    if (pararDepois) return falhou(`${pararDepois}. O commit da feature, ${commit}, já entrou em retomar: decida à mão antes de retomar`)
   }
   return { resultados, commits }
 }

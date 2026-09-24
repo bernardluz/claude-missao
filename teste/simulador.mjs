@@ -25,6 +25,8 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   semArquivos        worker não declara arquivos
 //   jaResolvidoCorrecao correções voltam jaResolvido
 //   branchNaConferencia branch devolvida pela conferência (simula troca de branch)
+//   recusa             { [feature]: { motivo, commita?, ...campos } } o harness recusa um comando do agente de
+//                      commit; com commita, a recusa vem depois do commit
 export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0000'], sujo: false }) {
   const o = opcoes
   const quedas = { ...(o.quedas ?? {}) }
@@ -74,12 +76,15 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     }
     if (l.startsWith('commit: ')) {
       const f = l.slice(8)
+      const { commita: recusaDepois, ...recusa } = o.recusa?.[f] ?? {}
+      if (o.recusa?.[f] && !recusaDepois) return { commitado: false, recusado: true, ...recusa }
       if (fora[f] > 0) { fora[f]--; return { commitado: false, foraDaLista: ['y/b.js'] } }
       if (gate[f] > 0) { gate[f]--; return { commitado: false, gateFalhou: true, motivo: 'lint' } }
       if (!estado.sujo) return { commitado: false, motivo: 'nada a commitar' }
       const sha = novoSha()
       estado.git.push(sha)
       estado.sujo = false
+      if (recusaDepois) return { commitado: true, commit: sha, recusado: true, ...recusa }
       return { commitado: true, commit: sha }
     }
     // worker, ajuste ou correção

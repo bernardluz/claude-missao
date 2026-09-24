@@ -30,6 +30,9 @@ uma rodada traz problemas demais.
 
 - **Commit só com revisão.** O agente de commit nunca altera código. Se um gate do commit falha, a
   falha vira ajuste e passa pela revisão de novo.
+- **Recusa não é contornada.** Se o harness ou o classificador de permissões recusa um comando, o
+  agente de commit não tenta de outro jeito: devolve o texto da recusa, e a missão para, porque a
+  decisão é humana. Se o commit já tinha sido feito, ele entra no `retomar`.
 - **Git conferido.** Um agente só-leitura confere o git real, sem confiar no relato dos workers:
   branch, árvore limpa e a lista exata de commits. Commit de outra sessão no intervalo faz a missão
   parar.

@@ -67,6 +67,34 @@ describe('fluxo principal', () => {
 })
 
 describe('agente de commit', () => {
+  test('recusa do harness para a missão, mesmo junto de gate, sem virar ajuste', async () => {
+    for (const recusa of [{ motivo: 'Credential Leakage' }, { motivo: 'Credential Leakage', gateFalhou: true }]) {
+      const r = await rodar(plano(), { recusa: { F1: recusa } })
+      assert.equal(r.resultado.parouEm, 'M1')
+      assert.match(r.resultado.motivo, /recusou um comando do agente de commit.*: Credential Leakage\./)
+      assert.match(r.resultado.motivo, /ficou sem commit/)
+      assert.equal(r.contar('F1 · ajuste'), 0)
+      assert.equal(r.contar('commit: F1'), 1)
+      assert.equal(r.commits, 0)
+    }
+  })
+
+  test('recusa depois do commit: o commit entra no retomar e a missão para', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const r = await rodar(plano(), { recusa: { F1: { motivo: 'Credential Leakage', commita: true } } }, estado)
+    assert.match(r.resultado.motivo, /: Credential Leakage\. O commit da feature, sha00001, já entrou em retomar/)
+    assert.doesNotMatch(r.resultado.motivo, /ficou sem commit/)
+    assert.deepEqual(r.resultado.retomar.concluidas, ['F1'])
+    assert.equal(r.resultado.retomar.head, estado.git.at(-1))
+    assert.equal(r.contar('F2'), 0)
+  })
+
+  test('prompt proíbe contornar recusa', async () => {
+    const p = (await rodar(plano())).prompt('commit: F1')
+    assert.match(p, /recusar uma ferramenta ou um comando, não tente de outro jeito/)
+    assert.match(p, /devolva recusado=true, o texto da recusa em motivo e commitado=false, ou commitado=true com o SHA/)
+  })
+
   test('prompts que rodam build, testes ou gates mandam a saída para arquivo, nunca por pipe', async () => {
     const r = await rodar(plano(), { revisaoFeature: { F1: [1, 0] } })
     for (const label of ['F1', 'F1 · ajuste 1', 'revisão: F1', 'commit: F1', 'revisão: M1', 'testes: M1', 'suíte completa']) {
