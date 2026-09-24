@@ -66,6 +66,17 @@ describe('fluxo principal', () => {
   })
 })
 
+describe('agente de commit', () => {
+  test('prompts que rodam build, testes ou gates mandam a saída para arquivo, nunca por pipe', async () => {
+    const r = await rodar(plano(), { revisaoFeature: { F1: [1, 0] } })
+    for (const label of ['F1', 'F1 · ajuste 1', 'revisão: F1', 'commit: F1', 'revisão: M1', 'testes: M1', 'suíte completa']) {
+      assert.match(r.prompt(label), /<comando> > "\$log" 2>&1; echo "saida=\$\?"; tail -40 "\$log"/, label)
+      assert.match(r.prompt(label), /Nunca leia a saída por pipe \(`\| tail`, `\| head`, `\| tee`\): um daemon/, label)
+    }
+    assert.match(r.prompt('commit: F1'), /git commit -F <arquivo> -- <paths> > "\$log" 2>&1; echo "saida=\$\?"; tail -40 "\$log"/)
+  })
+})
+
 describe('loop de validação e correção', () => {
   test('continua enquanto os problemas diminuem', async () => {
     const r = await rodar(plano(), { validacao: [3, 2, 1, 0] })

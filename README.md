@@ -33,6 +33,9 @@ uma rodada traz problemas demais.
 - **Git conferido.** Um agente só-leitura confere o git real, sem confiar no relato dos workers:
   branch, árvore limpa e a lista exata de commits. Commit de outra sessão no intervalo faz a missão
   parar.
+- **Saída em arquivo, nunca em pipe.** Os agentes mandam a saída de build, testes, gates e
+  `git commit` para arquivo temporário e leem o arquivo depois. Um daemon deixado vivo pelo gate, como o
+  do compilador Kotlin, herda o pipe e trava o comando.
 - **Quedas retentadas com segurança.**
   - Agente que cai (modelo ou API) é retentado.
   - Worker que caiu deixando diff parcial é continuado por outro.

@@ -93,6 +93,11 @@ const GIT_PROIBIDO =
 const TESTES = CONFIG.regrasTestes
   ? `Siga ${CONFIG.regrasTestes} para escolher e rodar os testes focados`
   : 'Escolha e rode os testes focados que cobrem a mudança, com o runner já adotado no projeto'
+const SAIDA_EM_ARQUIVO =
+  'Ao rodar build, testes ou gates (Maven, Gradle, npm, hooks do git), mande a saída para um arquivo temporário FORA ' +
+  'do repositório e leia o arquivo depois: `log=$(mktemp); <comando> > "$log" 2>&1; echo "saida=$?"; tail -40 "$log"`. ' +
+  'Nunca leia a saída por pipe (`| tail`, `| head`, `| tee`): um daemon que o comando deixa vivo, como o do compilador ' +
+  'Kotlin, herda o pipe e o comando nunca termina.'
 
 const PREPARO = {
   type: 'object',
@@ -302,7 +307,7 @@ function normalizar(a) {
 function promptTrabalho(f, extra) {
   return comGuia(
     `Implemente a feature "${f.titulo}".\nSpec: ${f.spec}\n${extra}\n` +
-    `${TESTES}, e revise o próprio diff.\n` +
+    `${TESTES}, e revise o próprio diff.\n` + SAIDA_EM_ARQUIVO + '\n' +
     'NÃO faça commit nem stage: a revisão independente' +
     (CONFIG.regrasProjeto ? ` exigida pelo ${CONFIG.regrasProjeto}` : '') +
     ' é o próximo passo deste workflow e o commit vem depois dela. Não tente lançar revisor.\n' +
@@ -324,9 +329,11 @@ async function commitar(f, arquivos, fase, antes) {
     'aparece no `git status` (revertido no ajuste) é ignorado;\n' +
     `- mensagem ${CONFIG.formatoCommit} em ${CONFIG.idioma} descrevendo a feature, gravada em arquivo temporário FORA do repositório ` +
     '(ex.: saída de `mktemp`), usada com `git commit -F <arquivo> -- <paths>` e apagada depois;\n' +
+    '- rode o commit com a saída em arquivo, nunca por pipe, porque os hooks rodam gates: ' +
+    '`log=$(mktemp); git commit -F <arquivo> -- <paths> > "$log" 2>&1; echo "saida=$?"; tail -40 "$log"`;\n' +
     '- você NÃO altera código em hipótese alguma: se um gate do commit falhar, não corrija; devolva commitado=false, ' +
     'gateFalhou=true e a saída relevante em motivo;\n' +
-    '- devolva o SHA completo (`git rev-parse HEAD`).\n' + GIT_PROIBIDO,
+    '- devolva o SHA completo (`git rev-parse HEAD`).\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO,
     { label: `commit: ${f.titulo}`, phase: fase, schema: RESULTADO_COMMIT, effort: 'low' },
   )
   let r = await chamar()
@@ -409,7 +416,7 @@ async function implementar(features, fase) {
         `Revisão independente, antes do commit, da feature "${f.titulo}". Spec: ${f.spec}\n` +
         'Todo o diff ainda não commitado é desta feature: veja `git status`, `git diff HEAD` (inclui o que estiver em ' +
         'stage) e os arquivos novos. Aponte só problemas bloqueantes de correção, segurança, contrato ou testes faltantes.' +
-        memoria + '\nSomente leitura. ' + GIT_PROIBIDO,
+        memoria + '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO,
         { label: `revisão: ${f.titulo}`, phase: fase, agentType: revisorPara([...arquivos]), schema: VALIDACAO },
       ))
       if (!rev) return falhou('revisor da feature não respondeu.' + sujo)
@@ -483,7 +490,7 @@ async function validarSuite(anteriores) {
       'identifique os módulos, pacotes ou apps tocados e os que dependem deles, e rode a suíte inteira de cada um ' +
       '(não só testes focados), com os runners já adotados no projeto.'
   const r = await comRetentativa('suíte completa', () => agent(
-    `${como} Faça isso no HEAD atual, sem alterar código. Guarde a saída completa em arquivo temporário FORA do repositório. ` +
+    `${como} Faça isso no HEAD atual, sem alterar código. ${SAIDA_EM_ARQUIVO} ` +
     'Não rode comandos que alterem lockfiles ou dependências versionadas. Confira `git status` antes e depois: ao ' +
     'terminar, desfaça somente o que a própria suíte criou ou alterou (remova arquivos novos gerados por ela e use ' +
     '`git restore -- <path>` nos que ela modificou), deixando a árvore como estava. Esses arquivos são seus, não ' +
@@ -517,13 +524,13 @@ async function validar(m, base, arquivos, anteriores) {
     () => comRetentativa(`revisão: ${m.titulo}`, () => agent(
       `Revise os commits ${intervalo} do milestone "${m.titulo}" (critério: ${m.criterio}). ` +
       'Aponte só problemas bloqueantes de correção, segurança, contrato ou atomicidade dos commits.' + memoria +
-      '\nSomente leitura. ' + GIT_PROIBIDO,
+      '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO,
       { label: `revisão: ${m.titulo}`, phase: 'Validar', agentType: revisorPara(arquivos.map(normalizar)), schema: VALIDACAO },
     )),
     () => comRetentativa(`testes: ${m.titulo}`, () => agent(
       `Rode, no HEAD atual, os testes focados que cobrem os commits ${intervalo} do milestone "${m.titulo}" ` +
       `e confira o critério: ${m.criterio}. Não altere código. Reporte falhas com a saída relevante.` + memoria +
-      '\n' + GIT_PROIBIDO,
+      '\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO,
       { label: `testes: ${m.titulo}`, phase: 'Validar', schema: VALIDACAO },
     )),
   ])
