@@ -56,7 +56,8 @@ missao-<slug>/            story   "Missão: <nome>"            status 0→1→2
 
 `estado/index.md` é a fonte da retomada. Atualize-o **a cada passo concluído**, sem esperar o fim do milestone:
 raiz do repo, branch, commit inicial (`inicio`), HEAD esperado, lista de commits por feature (`sha`, título,
-arquivos), milestone e feature atuais, rodada de correção e contagem de problemas da rodada anterior.
+arquivos), milestone e feature atuais, rodada de correção, contagem de problemas da rodada anterior e as lições da
+missão (regras cobradas por revisor ou gate).
 
 ## Fluxo
 
@@ -78,8 +79,9 @@ Uma feature por vez. Ticket em status 1.
 1. **Implementar.** Crie um filho novo (`traycer_create_agent`, mesmo workspace) e mande: spec da feature, guia do
    tipo, `regrasTestes`, `regrasProjeto`. Proibido: commit, amend, stash, push, trocar de branch, reset/checkout
    destrutivo, `--no-verify`, criar agentes e `proibicoesExtras`. Ele escreve os próprios testes. Se a feature
-   usar escape Unicode, inclua o aviso de [Escapes Unicode](#escapes-unicode). Peça de volta: arquivos alterados,
-   testes rodados e resultado.
+   usar escape Unicode, inclua o aviso de [Escapes Unicode](#escapes-unicode). Inclua também as **lições** da
+   missão: regras que um revisor ou gate já cobrou em features anteriores e que o guia não traz. Grave cada lição
+   nova em `estado/`, para ela chegar à retomada. Peça de volta: arquivos alterados, testes rodados e resultado.
 2. **Conferir o git.** Não confie no relato. Confira HEAD igual ao esperado (sem commit de outra sessão) e
    `git status --porcelain` com o conjunto real de arquivos. Arquivo fora do escopo da feature volta ao
    implementador como ajuste.
@@ -90,9 +92,12 @@ Uma feature por vez. Ticket em status 1.
 4. **Ajustar.** Com apontamentos, devolva-os ao **mesmo** implementador. Na volta, repita o passo 2 e mande o novo
    diff ao **mesmo** revisor, continuando a conversa. Passou de `maxRodadasRevisao`: pare.
 5. **Commit.** Só com `aprovado` na última rodada e sem mudança depois dela. Você commita, sem tocar no código:
-   `git add -- <arquivos revisados>` e `git commit -F <arquivo no scratchpad> -- <arquivos revisados>`, no
-   `formatoCommit` e no `idioma`, com as linhas de atribuição da sessão. Gate do commit falhou: a saída vira
-   apontamento para o implementador e a feature volta ao passo 4 (nova revisão).
+   `git add -- <arquivos revisados>`, confira que `git diff -- <arquivos revisados>` está vazio (o stage é
+   exatamente o que foi revisado) e rode `git commit -F - -- <arquivos revisados>` com a mensagem pela entrada padrão.
+   Arquivo de mensagem no scratchpad pode falhar por caminho longo no Windows. Use o `formatoCommit` e o `idioma`,
+   com as linhas de atribuição da sessão. Gate do commit falhou: nada entrou, a saída vira apontamento para o
+   implementador e a feature volta ao passo 4 (nova revisão). O stage fica com a versão antiga. Por isso o
+   `git add` e a conferência de `git diff` vazio valem em toda tentativa, e não só na primeira.
 6. **Conferir o commit.** `git show --name-only --format='%H %P' HEAD`: o pai é o HEAD esperado e os arquivos são
    exatamente os revisados. Árvore limpa depois. Grave no estado e no ticket. Ticket em status 2. Arquive os dois
    filhos (`traycer_archive_agent`).
@@ -104,8 +109,10 @@ Passe o critério do milestone e o intervalo `<commit antes do milestone>..HEAD`
 de problemas, cada um com evidência (arquivo, teste, saída).
 
 - **Aprovado:** story do milestone em status 2. Próximo milestone.
-- **Problemas:** cada um vira um ticket `c<n>-…` e segue o fluxo do passo 3 inteiro, com revisão e commit próprios.
-  Depois, valide de novo com um validador novo.
+- **Problemas:** em regra, cada um vira um ticket `c<n>-…` e segue o fluxo do passo 3 inteiro, com revisão e commit próprios.
+  Problemas ligados podem virar **um** ticket, por exemplo um recurso que falta e o teste dele. Registre o
+  agrupamento no artefato do milestone. A contagem do loop continua sendo a dos problemas apontados, não a dos
+  tickets. Depois, valide de novo com um validador novo.
 
 O loop continua enquanto cada rodada aponta **menos** problemas que a anterior. Pare se a contagem não cair, se
 passar de `maxRodadasCorrecao` ou se passar de `maxProblemasPorRodada`.
