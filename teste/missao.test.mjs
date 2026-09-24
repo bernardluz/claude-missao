@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { executar, carregar, plano } from './simulador.mjs'
+import { executar, carregar, plano, DUMP } from './simulador.mjs'
 import { readFileSync } from 'node:fs'
 import { NUCLEO, gerar } from '../instalar.mjs'
 
@@ -102,6 +102,99 @@ describe('agente de commit', () => {
       assert.match(r.prompt(label), /Nunca leia a saída por pipe \(`\| tail`, `\| head`, `\| tee`\): um daemon/, label)
     }
     assert.match(r.prompt('commit: F1'), /git commit -F <arquivo> -- <paths> > "\$log" 2>&1; echo "saida=\$\?"; tail -40 "\$log"/)
+  })
+})
+
+describe('dump de crash do bash', () => {
+  test('agente de commit apaga o dump e a missão registra no log, sem ajuste', async () => {
+    const r = await rodar(plano(), { dump: { F1: 1 } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('F1 · ajuste'), 0)
+    assert.ok(r.logs.includes(`F1: agente de commit apagou dump de crash do bash: ${DUMP}`))
+    assert.deepEqual(r.estado.dumps, [])
+    assert.match(r.prompt('commit: F1'), /`\*\.stackdump` não rastreado na raiz .* apague-o, informe o caminho em descartados/)
+  })
+
+  test('dump listado como fora da lista não vira apontamento: o commit é repetido', async () => {
+    const r = await rodar(plano(), { dump: { F1: 1 }, ignoraDump: { F1: 1 } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('F1 · ajuste'), 0)
+    assert.equal(r.contar('revisão: F1'), 1)
+    const tentativas = r.chamadas.filter(c => c.label === 'commit: F1')
+    assert.equal(tentativas.length, 2)
+    assert.match(tentativas[1].prompt, /listou bash\.exe\.stackdump como fora da lista: é dump de crash do bash/)
+  })
+
+  test('agente que insiste em listar o dump para a missão sem ajuste', async () => {
+    const r = await rodar(plano(), { dump: { F1: 1 }, ignoraDump: { F1: 2 } })
+    assert.match(r.resultado.motivo, /não apagou o dump de crash do bash \(bash\.exe\.stackdump\)/)
+    assert.equal(r.contar('F1 · ajuste'), 0)
+  })
+
+  test('dump junto de mudança alheia: só a mudança alheia vira apontamento', async () => {
+    const r = await rodar(plano(), { dump: { F1: 1 }, ignoraDump: { F1: 1 }, foraDaLista: { F1: 1 } })
+    assert.equal(r.resultado.concluido, true)
+    const ajuste = r.prompt('F1 · ajuste 1')
+    assert.match(ajuste, /fora da lista da feature: y\/b\.js\./)
+    assert.doesNotMatch(ajuste, /stackdump/)
+  })
+
+  test('dump que sobra no fim do milestone é tolerado na conferência e apagado no commit seguinte', async () => {
+    const r = await rodar(plano(), { dump: { 'commit: F2': 1 } })
+    assert.equal(r.resultado.concluido, true)
+    const i = r.logs.indexOf(`dump de crash do bash na raiz, tolerado como artefato do ambiente: ${DUMP}`)
+    assert.ok(i >= 0 && i < r.logs.indexOf(`F3: agente de commit apagou dump de crash do bash: ${DUMP}`))
+  })
+
+  test('dump junto de mudança real ou fora da raiz não é tolerado', async () => {
+    const junto = await rodar(plano(), { dump: { 'commit: F2': 1 }, suja: { 'commit: F2': 1 } })
+    assert.match(junto.resultado.motivo, /árvore com mudanças não commitadas.*: M x\/a\.js, \?\? bash\.exe\.stackdump$/)
+    const naPasta = await rodar(plano(), { dump: { 'commit: F2': 1 }, caminhoDump: 'x/bash.exe.stackdump' })
+    assert.match(naPasta.resultado.motivo, /árvore com mudanças não commitadas.*: \?\? x\/bash\.exe\.stackdump$/)
+  })
+
+  test('dump na raiz não impede começar a missão', async () => {
+    const r = await rodar(plano(), {}, { git: ['base0000'], sujo: false, dumps: [DUMP] })
+    assert.equal(r.resultado.concluido, true)
+    assert.deepEqual(r.estado.dumps, [])
+  })
+
+  test('dump tolerado na adoção do commit e na retentativa do worker', async () => {
+    const adotado = await rodar(plano(), {
+      quedas: { 'commit: F1': 1 }, efeitoDaQueda: { 'commit: F1': 'commita' }, dump: { 'commit: F1': 1 },
+    })
+    assert.equal(adotado.resultado.concluido, true)
+    assert.equal(adotado.contar('commit: F1'), 1)
+    const worker = await rodar(plano(), { quedas: { F2: 1 }, dump: { F2: 1 } })
+    assert.equal(worker.resultado.concluido, true)
+    assert.doesNotMatch(worker.chamadas.filter(c => c.label === 'F2')[1].prompt, /trabalho parcial/)
+  })
+
+  test('dump declarado pelo worker ou pelo ajuste sai da lista da feature, e a revisão o ignora', async () => {
+    const r = await rodar(plano(), { arquivos: ['x/a.js', DUMP], arquivosGit: ['x/a.js'] })
+    assert.equal(r.resultado.concluido, true)
+    assert.match(r.prompt('commit: F1'), /Arquivos da feature: x\/a\.js\.\n/)
+    assert.match(r.prompt('revisão: F1'), /`\*\.stackdump` não rastreado na raiz .*: ignore-o\./)
+    const ajuste = await rodar(plano(), { revisaoFeature: { F1: [1, 0] }, arquivosAjuste: ['x/a.js', DUMP], arquivosGit: ['x/a.js'] })
+    assert.equal(ajuste.resultado.concluido, true)
+    assert.match(ajuste.prompt('commit: F1'), /Arquivos da feature: x\/a\.js\.\n/)
+  })
+
+  test('agente de commit que apaga além do dump para a missão', async () => {
+    const r = await rodar(plano(), { dump: { F1: 1 }, apagaAlem: { F1: ['hs_err_pid1.log'] } })
+    assert.match(r.resultado.motivo, /apagou o que não é dump de crash do bash: hs_err_pid1\.log\. O commit da feature, sha00001, já entrou em retomar/)
+    assert.ok(r.logs.includes(`F1: agente de commit apagou dump de crash do bash: ${DUMP}`))
+    assert.deepEqual(r.resultado.retomar.concluidas, ['F1'])
+    // Apagado a mais na tentativa que listou o dump não se perde na repetição do commit.
+    const naRepeticao = await rodar(plano(), { dump: { F1: 1 }, ignoraDump: { F1: 1 }, apagaAlem: { F1: ['notas.txt'] } })
+    assert.match(naRepeticao.resultado.motivo, /apagou o que não é dump de crash do bash: notas\.txt\. Decida à mão/)
+    assert.equal(naRepeticao.contar('commit: F1'), 1)
+  })
+
+  test('arquivo temporário fora do repositório não conta como apagado a mais', async () => {
+    const temporarios = ['/tmp/tmp.Ab12Cd', 'C:\\Users\\x\\AppData\\Local\\Temp\\msg.txt', '/c/Users/x/AppData/Local/Temp/log.txt']
+    const r = await rodar(plano(), { dump: { F1: 1 }, apagaAlem: { F1: temporarios } })
+    assert.equal(r.resultado.concluido, true)
   })
 })
 
