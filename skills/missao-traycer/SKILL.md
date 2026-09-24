@@ -12,6 +12,22 @@ Antes de despachar, leia `../traycer-references/loop-protocol.md` se ele existir
 `expectReply: true`. Depois de despachar, **encerre o turno**: a resposta do filho é o que te acorda. Nunca termine um
 turno com trabalho em aberto e ninguém devendo o próximo passo.
 
+## Regras para todos
+
+Valem para você e para todo filho, em qualquer passo:
+
+- **Saída em arquivo, nunca em pipe.** `git commit`, gates, builds e testes (Maven, Gradle, npm, hooks do git)
+  mandam a saída para um arquivo temporário fora do repositório, lido depois:
+  `log=$(mktemp); <comando> > "$log" 2>&1; echo "saida=$?"; tail -40 "$log"`. Nunca `| tail`, `| head` ou `| tee`:
+  um daemon deixado vivo pelo gate, como o do compilador Kotlin, herda o pipe e o comando nunca termina.
+- **Recusa não é contornada.** Se o harness ou o classificador de permissões recusar um comando ou uma ferramenta,
+  não tente de outro jeito (outro comando, outra ferramenta, outro caminho). Você para a missão e mostra ao usuário
+  o texto da recusa. Filho que recebe recusa devolve a você o texto, sem tentar de novo.
+- **Dump de crash do bash.** `*.stackdump` não rastreado na raiz do repo é dump de crash do bash do Windows (msys).
+  Você o apaga, registra em `estado/` e não o trata como mudança fora do escopo da feature nem como árvore suja.
+  Filhos não mexem nele: ignoram e deixam para você. Apagar qualquer outra coisa não é permitido; se você ou um filho
+  apagou, pare.
+
 ## Entrada
 
 O plano vem do usuário, de um artefato do epic ou de `args`:
@@ -63,7 +79,8 @@ missão (regras cobradas por revisor ou gate).
 
 ### 1. Preparar
 
-Rode você mesmo e confira: raiz (`git rev-parse --show-toplevel`), branch, `git status --porcelain` vazio e HEAD.
+Rode você mesmo e confira: raiz (`git rev-parse --show-toplevel`), branch, `git status --porcelain` vazio (salvo dump
+de crash do bash, que você apaga) e HEAD.
 Árvore suja ou branch `main`: pare e diga por quê. Grave `inicio` = HEAD no estado.
 
 ### 2. Guias da missão
@@ -78,13 +95,14 @@ Uma feature por vez. Ticket em status 1.
 
 1. **Implementar.** Crie um filho novo (`traycer_create_agent`, mesmo workspace) e mande: spec da feature, guia do
    tipo, `regrasTestes`, `regrasProjeto`. Proibido: commit, amend, stash, push, trocar de branch, reset/checkout
-   destrutivo, `--no-verify`, criar agentes e `proibicoesExtras`. Ele escreve os próprios testes. Se a feature
-   usar escape Unicode, inclua o aviso de [Escapes Unicode](#escapes-unicode). Inclua também as **lições** da
-   missão: regras que um revisor ou gate já cobrou em features anteriores e que o guia não traz. Grave cada lição
-   nova em `estado/`, para ela chegar à retomada. Peça de volta: arquivos alterados, testes rodados e resultado.
-2. **Conferir o git.** Não confie no relato. Confira HEAD igual ao esperado (sem commit de outra sessão) e
-   `git status --porcelain` com o conjunto real de arquivos. Arquivo fora do escopo da feature volta ao
-   implementador como ajuste.
+   destrutivo, `--no-verify`, criar agentes e `proibicoesExtras`. Ele escreve os próprios testes. Cite no briefing as
+   [Regras para todos](#regras-para-todos). Se a feature usar escape Unicode, inclua o aviso de
+   [Escapes Unicode](#escapes-unicode). Inclua também as **lições** da missão: regras que um revisor ou gate já cobrou
+   em features anteriores e que o guia não traz. Grave cada lição nova em `estado/`, para ela chegar à retomada.
+   Peça de volta: arquivos alterados, testes rodados e resultado.
+2. **Conferir o git.** Não confie no relato. Confira HEAD igual ao esperado (commit de outra sessão: veja
+   [Commit de fora](#commit-de-fora)) e `git status --porcelain` com o conjunto real de arquivos, sem contar o dump de
+   crash do bash. Arquivo fora do escopo da feature volta ao implementador como ajuste.
 3. **Revisar.** Na primeira rodada, crie **um** revisor para a feature: papel de `revisoresPorPasta` quando todos
    os arquivos estão no prefixo, senão `revisor`. Ele só lê. Passe a spec e o `git diff` dos arquivos. Resposta:
    `aprovado` ou apontamentos bloqueantes, cada um com arquivo e motivo. Quem registra a resposta em `revisao-<n>/`
@@ -93,14 +111,26 @@ Uma feature por vez. Ticket em status 1.
    diff ao **mesmo** revisor, continuando a conversa. Passou de `maxRodadasRevisao`: pare.
 5. **Commit.** Só com `aprovado` na última rodada e sem mudança depois dela. Você commita, sem tocar no código:
    `git add -- <arquivos revisados>`, confira que `git diff -- <arquivos revisados>` está vazio (o stage é
-   exatamente o que foi revisado) e rode `git commit -F - -- <arquivos revisados>` com a mensagem pela entrada padrão.
+   exatamente o que foi revisado) e rode o commit com a mensagem pela entrada padrão e a saída em arquivo, porque os
+   hooks rodam gates:
+
+   ```bash
+   log=$(mktemp); git commit -F - -- <arquivos revisados> > "$log" 2>&1 <<'MSG'
+   <mensagem do commit>
+   MSG
+   echo "saida=$?"; tail -40 "$log"
+   ```
+
    Arquivo de mensagem no scratchpad pode falhar por caminho longo no Windows. Use o `formatoCommit` e o `idioma`,
    com as linhas de atribuição da sessão. Gate do commit falhou: nada entrou, a saída vira apontamento para o
    implementador e a feature volta ao passo 4 (nova revisão). O stage fica com a versão antiga. Por isso o
    `git add` e a conferência de `git diff` vazio valem em toda tentativa, e não só na primeira.
-6. **Conferir o commit.** `git show --name-only --format='%H %P' HEAD`: o pai é o HEAD esperado e os arquivos são
-   exatamente os revisados. Árvore limpa depois. Grave no estado e no ticket. Ticket em status 2. Arquive os dois
-   filhos (`traycer_archive_agent`).
+6. **Conferir o commit.** `git rev-list <HEAD esperado>..HEAD` tem de ser só o SHA do seu commit, e
+   `git show --name-only --format='%H %P' HEAD` mostra o pai igual ao HEAD esperado e exatamente os arquivos revisados.
+   Árvore limpa depois, salvo dump de crash do bash. Outro SHA no intervalo: grave o seu commit no estado, se ele tem
+   só arquivos revisados, e pare, como em [Commit de fora](#commit-de-fora). Arquivo não revisado no seu commit: pare
+   sem gravá-lo. Tudo certo: grave no estado e no ticket. Ticket em status 2. Arquive os dois filhos
+   (`traycer_archive_agent`).
 
 ### 4. Validar o milestone
 
@@ -133,7 +163,8 @@ Um filho que encerra o turno sem responder, com erro de modelo ou API, ou sem re
 - **Sem rastro no repo:** crie um filho novo com o mesmo briefing.
 - **Implementador com diff parcial:** crie outro filho para **continuar** o diff existente. Não descarte o diff.
 - **Caiu depois do seu commit:** só adote o commit se o pai for o HEAD esperado e os arquivos forem exatamente os
-  da feature revisada. Caso contrário, pare.
+  da feature revisada. Caso contrário, pare. Se `<HEAD esperado>..HEAD` tiver SHA que não é seu, cite-o, como em
+  [Commit de fora](#commit-de-fora).
 
 Cada queda conta em `maxRetentativasInfra`. Esgotou: pare.
 
@@ -141,7 +172,8 @@ Cada queda conta em `maxRetentativasInfra`. Esgotou: pare.
 
 Pare, sem commitar nada pendente, quando:
 - um limite estourar;
-- aparecer commit que não é seu;
+- aparecer commit que não é seu ([Commit de fora](#commit-de-fora));
+- o harness recusar um comando seu ou de um filho;
 - o git não bater com o estado;
 - surgir desalinhamento de produto.
 
@@ -151,8 +183,22 @@ Ao parar:
 3. Diga ao usuário, em poucas linhas, o que parou e as opções.
 
 Para **retomar**, releia `estado/`. Confira que branch e HEAD batem com o gravado e que a árvore está limpa, salvo o
-diff parcial da feature em curso. Continue do ponto gravado. Features já commitadas são reconhecidas pelo título
-exato: não renomeie entre execuções. Se o repositório não bater, não adivinhe: mostre a diferença ao usuário.
+diff parcial da feature em curso e o dump de crash do bash. Continue do ponto gravado. Features já commitadas são
+reconhecidas pelo título exato: não renomeie entre execuções. Se o repositório não bater, não adivinhe:
+mostre a diferença ao usuário.
+
+### Commit de fora
+
+Commit de outra sessão ou automação no meio da missão faz você parar na hora, sem adotá-lo. Diga ao usuário o SHA
+(`git rev-list --reverse <HEAD esperado>..HEAD`) e as duas saídas:
+
+- **Aceitar:** grave na lista de commits do estado todos os SHAs do intervalo, na ordem do `--reverse`: os de fora
+  marcados como de fora e o seu, se já conferido, como commit da feature. Grave o HEAD real como HEAD esperado. Se o
+  diff da feature em curso foi junto num commit de fora, marque a feature como concluída.
+- **Recusar:** o usuário tira o commit do histórico e você ajusta o estado ao git resultante.
+
+Sem um dos dois ajustes, a retomada recusa. Seu commit com arquivo que a revisão não viu segue a mesma regra: fica
+fora da lista do estado até o usuário decidir; recusado, a feature se repete.
 
 ## Filhos
 
@@ -161,6 +207,8 @@ exato: não renomeie entre execuções. Se o repositório não bater, não adivi
   - a fronteira: o que pode mudar, o que deve conferir e o que devolve;
   - o aviso de que o filho não fala com o usuário;
   - o pedido para responder a você com `expectReply: true`.
+- Filho que roda build, testes ou gates recebe no briefing a regra da saída em arquivo. Todo filho recebe a da
+  recusa: devolve o texto a você em vez de tentar de novo.
 - Filhos não criam outros agentes nem commitam. Isso vale mesmo que o guia de seleção de agentes do usuário mande
   delegar testes a outro agente: o implementador escreve os próprios testes, e o briefing diz isso.
 
