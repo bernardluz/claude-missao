@@ -23,7 +23,7 @@ describe('fluxo principal', () => {
     const r = await rodar(plano())
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.commits, 3)
-    assert.equal(r.agentes, 2 + 3 * 3 + 4 * 2 + 3)
+    assert.equal(r.agentes, 2 + 4 * 3 + 4 * 2 + 3)
     assert.equal(r.contar('suíte completa'), 1)
     assert.match(r.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${r.agentes} agentes`))
     assert.equal(r.contar('revisão: F'), 3)
@@ -63,6 +63,124 @@ describe('fluxo principal', () => {
     const r = await rodar(plano(), { semArquivos: true })
     assert.match(r.resultado.motivo, /não declarou arquivos/)
     assert.equal(r.contar('revisão: '), 0)
+  })
+})
+
+describe('conferência logo depois do commit', () => {
+  test('cada commit é conferido a partir do HEAD anterior da missão', async () => {
+    const r = await rodar(plano())
+    const ordem = r.chamadas.map(c => c.label)
+    const [f1, f2] = r.resultado.relatorio[0].features.map(x => x.commit)
+    for (const [feature, antes] of [['F1', 'base0000'], ['F2', f1]]) {
+      const i = ordem.indexOf(`commit: ${feature}`)
+      assert.equal(ordem[i + 1], 'conferência', feature)
+      assert.match(r.chamadas[i + 1].prompt, new RegExp(`rev-list --reverse ${antes}\\.\\.HEAD`), feature)
+    }
+    assert.notEqual(f1, f2)
+  })
+
+  test('commit de fora antes do commit da feature: para com o sha, e o retomar ajustado segue', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { commitDeFora: { F2: 'fora0001' } }, estado)
+    assert.equal(p1.resultado.parouEm, 'M1')
+    assert.match(p1.resultado.motivo, /commit de fora da missão logo depois da feature "F2": fora0001\./)
+    assert.match(p1.resultado.motivo, /git rev-list --reverse <retomar\.base>\.\.HEAD/)
+    assert.equal(p1.contar('revisão: M1'), 0)
+    const retomar = p1.resultado.retomar
+    assert.deepEqual(retomar.concluidas, ['F1', 'F2'])
+    assert.equal(retomar.head, estado.git.at(-1))
+    assert.equal(retomar.commits.length, 2)
+    // Sem ajuste, a retomada recusa: aceitar o commit de fora é decisão do usuário.
+    const semAjuste = await rodar(plano({ retomar }), {}, estado)
+    assert.match(semAjuste.resultado.motivo, /repositório mudou desde a parada/)
+    // Ajuste que o motivo ensina: commits reais do intervalo e HEAD real.
+    const p2 = await rodar(plano({ retomar: { ...retomar, commits: estado.git.slice(1), head: estado.git.at(-1) } }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('F1'), 0)
+    assert.equal(p2.contar('F2'), 0)
+    assert.equal(p2.contar('F3'), 1)
+  })
+
+  test('commit de fora depois do commit da feature: motivo traz o sha e o HEAD real', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const r = await rodar(plano(), { commitDeFora: { 'commit: F1': 'fora0001' } }, estado)
+    assert.match(r.resultado.motivo, /"F1": fora0001\./)
+    assert.match(r.resultado.motivo, /retomar\.head o HEAD real, fora0001/)
+    assert.equal(r.resultado.retomar.head, estado.git.at(-2))
+    assert.deepEqual(r.resultado.retomar.concluidas, ['F1'])
+    assert.equal(r.contar('F2'), 0)
+  })
+
+  test('commit de fora durante a validação: a conferência do milestone traz o sha', async () => {
+    const r = await rodar(plano(), { commitDeFora: { 'testes: M1': 'fora0002' } })
+    assert.equal(r.resultado.parouEm, 'M1')
+    assert.match(r.resultado.motivo, /^após validação: commit de fora da missão em base0000\.\.HEAD: fora0002\./)
+  })
+
+  test('commit de fora que leva o diff da feature: para com o sha, sem mandar descartar diff', async () => {
+    const r = await rodar(plano(), { commitDeForaTudo: { 'revisão: F1': 'fora0001' } })
+    assert.match(r.resultado.motivo, /não commitou \(nada a commitar\), e base0000\.\.HEAD tem commit de fora da missão: fora0001,/)
+    assert.match(r.resultado.motivo, /inclua também "F1" em retomar\.concluidas/)
+    assert.doesNotMatch(r.resultado.motivo, /ficou sem commit/)
+    assert.deepEqual(r.resultado.retomar.concluidas, [])
+  })
+
+  test('commit de fora com o diff da feature ainda na árvore: a parada lembra do diff', async () => {
+    const r = await rodar(plano(), { commitDeFora: { 'revisão: F1': 'fora0001' }, falhaCommit: { F1: 'index.lock existe' } })
+    assert.match(r.resultado.motivo, /não commitou \(index\.lock existe\), e base0000\.\.HEAD tem commit de fora da missão: fora0001,/)
+    assert.match(r.resultado.motivo, /O diff da feature ficou sem commit/)
+  })
+
+  test('SHA declarado que não está no git não entra no retomar', async () => {
+    const r = await rodar(plano(), { shaErrado: { F1: 'naoexiste' } })
+    assert.match(r.resultado.motivo, /declarou naoexiste, mas base0000\.\.HEAD tem sha00001/)
+    assert.deepEqual(r.resultado.retomar.concluidas, [])
+    assert.deepEqual(r.resultado.retomar.commits, [])
+  })
+
+  test('commit com arquivo que a revisão não viu fica fora do retomar até o usuário decidir', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const opcoes = { arquivosGit: ['x/a.js', 'y/b.js'] }
+    const p1 = await rodar(plano(), opcoes, estado)
+    assert.match(p1.resultado.motivo, /commit de "F1", sha00001, tem arquivos fora da lista revisada: y\/b\.js\. Ele ficou fora do retomar/)
+    const retomar = p1.resultado.retomar
+    assert.deepEqual(retomar.concluidas, [])
+    assert.deepEqual(retomar.commits, [])
+    const semAjuste = await rodar(plano({ retomar }), opcoes, estado)
+    assert.match(semAjuste.resultado.motivo, /repositório mudou desde a parada/)
+    const aceito = { ...retomar, commits: estado.git.slice(1), head: estado.git.at(-1), concluidas: ['F1'] }
+    const p2 = await rodar(plano({ retomar: aceito }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('F1'), 0)
+  })
+
+  test('pasta nova declarada como no git status cobre os arquivos de dentro', async () => {
+    const pasta = { arquivos: ['novo/'], arquivosGit: ['novo/a.js', 'novo/b.js'] }
+    assert.equal((await rodar(plano(), pasta)).resultado.concluido, true)
+    const adotado = await rodar(plano(), { ...pasta, quedas: { 'commit: F1': 1 }, efeitoDaQueda: { 'commit: F1': 'commita' } })
+    assert.equal(adotado.resultado.concluido, true)
+    assert.equal(adotado.contar('commit: F1'), 1)
+  })
+
+  test('árvore suja logo depois do commit para a missão, com as pendências no motivo', async () => {
+    const r = await rodar(plano(), { suja: { 'commit: F1': 1 } })
+    assert.match(r.resultado.motivo, /árvore com mudanças não commitadas depois do commit de "F1": M x\/a\.js/)
+    assert.equal(r.contar('F2'), 0)
+  })
+
+  test('conferência que não volta ou branch trocada logo depois do commit param a missão', async () => {
+    const semLeitura = await rodar(plano(), { quedas: { conferência: 3 } })
+    assert.match(semLeitura.resultado.motivo, /conferência logo depois do commit de "F1" não retornou; o commit declarado, sha00001/)
+    assert.deepEqual(semLeitura.resultado.retomar.concluidas, ['F1'])
+    const outraBranch = await rodar(plano(), { branchNaConferencia: 'outra' })
+    assert.match(outraBranch.resultado.motivo, /branch mudou para "outra" logo depois do commit de "F1"/)
+  })
+
+  test('dump logo depois do commit é tolerado na conferência e apagado no commit seguinte', async () => {
+    const r = await rodar(plano(), { dump: { 'commit: F1': 1 } })
+    assert.equal(r.resultado.concluido, true)
+    const i = r.logs.indexOf(`dump de crash do bash na raiz, tolerado como artefato do ambiente: ${DUMP}`)
+    assert.ok(i >= 0 && i < r.logs.indexOf(`F2: agente de commit apagou dump de crash do bash: ${DUMP}`))
   })
 })
 
@@ -320,9 +438,10 @@ describe('quedas de agente', () => {
     assert.match(tentativas[1].prompt, /trabalho parcial/)
   })
 
-  test('worker cai mexendo no histórico: para', async () => {
+  test('worker cai mexendo no histórico: para com o sha e como aceitar commit de fora', async () => {
     const r = await rodar(plano(), { quedas: { F2: 1 }, efeitoDaQueda: { F2: 'commitaOrfao' } })
-    assert.match(r.resultado.motivo, /mexeu no histórico/)
+    assert.match(r.resultado.motivo, /histórico mudou \(.*1 commit\(s\) novo\(s\): orfao000\), por commit dele ou de fora da missão/)
+    assert.match(r.resultado.motivo, /retomar\.head o HEAD real, orfao000/)
   })
 
   test('agente de commit cai depois de commitar: adota o commit', async () => {

@@ -13,7 +13,7 @@ Skills    → um agente só-leitura escreve guias por tipo de feature (vivem só
 
 Para cada milestone:
   Para cada feature, em série:
-    implementa (sem commit) → revisão independente → ajustes até aprovar → commit atômico
+    implementa (sem commit) → revisão independente → ajustes até aprovar → commit atômico → conferência
   Validar ◄───────────────────────────┐
      │ aprovou? não → Corrigir (cada problema vira uma feature, com revisão e commit próprios)
      ▼ sim
@@ -34,8 +34,14 @@ uma rodada traz problemas demais.
   agente de commit não tenta de outro jeito: devolve o texto da recusa, e a missão para, porque a
   decisão é humana. Se o commit já tinha sido feito, ele entra no `retomar`.
 - **Git conferido.** Um agente só-leitura confere o git real, sem confiar no relato dos workers:
-  branch, árvore limpa e a lista exata de commits. Commit de outra sessão no intervalo faz a missão
-  parar.
+  branch, árvore limpa e a lista exata de commits. A conferência roda logo depois de cada commit,
+  quando `<HEAD anterior>..HEAD` precisa ter só o commit da feature, e de novo a cada milestone.
+- **Commit de fora para a missão.** Commit de outra sessão ou automação faz a missão parar na
+  conferência logo depois do commit da feature, com o SHA dele no motivo. O commit da feature já entra
+  no `retomar`. Para aceitar o commit de fora, ponha em `retomar.commits` a saída de
+  `git rev-list --reverse <retomar.base>..HEAD` e em `retomar.head` o HEAD real. Para recusá-lo, tire-o
+  do histórico e ajuste o `retomar`. Sem ajuste, a retomada recusa. O mesmo vale para um commit da
+  feature com arquivo que a revisão não viu: ele fica fora do `retomar` até você decidir.
 - **Saída em arquivo, nunca em pipe.** Os agentes mandam a saída de build, testes, gates e
   `git commit` para arquivo temporário e leem o arquivo depois. Um daemon deixado vivo pelo gate, como o
   do compilador Kotlin, herda o pipe e trava o comando.
@@ -117,7 +123,7 @@ descartável `missao-teste/`.
 | `retomar` | — | Objeto `retomar` devolvido pela execução que parou |
 | `config` | — | Ajusta só `formatoCommit`, `idioma` e `exemplosSkills` nesta execução. Revisor, leitor e proibições vêm sempre da configuração instalada |
 
-**Custo esperado:** `5 + 3 × features + 4 × milestones` agentes, sem contar correções e
+**Custo esperado:** `5 + 4 × features + 4 × milestones` agentes, sem contar correções e
 retentativas. A suíte final pode levar muito tempo, conforme o projeto.
 
 O título `Suíte final` é reservado. Se a missão parar na suíte final, a retomada volta direto para ela.
@@ -216,4 +222,5 @@ npm test
 ```
 
 Os testes rodam o workflow com agentes falsos e um git simulado ([`teste/simulador.mjs`](teste/simulador.mjs)).
-Eles cobrem o fluxo por feature, o loop de correção, quedas, retomada, configuração e o instalador.
+Eles cobrem o fluxo por feature, a conferência depois de cada commit, o loop de correção, quedas, retomada,
+configuração e o instalador.

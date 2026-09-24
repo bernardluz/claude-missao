@@ -17,8 +17,9 @@ export const meta = {
 //
 // args: { milestones: [{ titulo, criterio, features: [{ titulo, spec }] }], maxRodadasCorrecao?, maxProblemasPorRodada?,
 //         maxRodadasRevisao?, maxFeaturesPorMilestone?, maxRetentativasInfra?, retomar?, config? }
-// Um commit atômico por feature, só depois de revisão independente aprovada; a validação do milestone revisa e
-// testa o conjunto e cria etapas de correção, em loop até aprovar ou parar de progredir. Depois do último milestone,
+// Um commit atômico por feature, só depois de revisão independente aprovada, e conferido logo em seguida: commit de
+// outra sessão no intervalo para a missão ali. A validação do milestone revisa e testa o conjunto e cria etapas de
+// correção, em loop até aprovar ou parar de progredir. Depois do último milestone,
 // a suíte completa do que a missão tocou, e de quem depende disso, roda uma vez e entra no mesmo loop de correção.
 // Correções seguem enquanto a validação aponta menos problemas que na rodada anterior; o teto só evita loop infinito.
 // Skills da missão vivem só nesta execução: vão no prompt dos workers e no retorno, nunca em .claude/skills/.
@@ -243,8 +244,9 @@ if (inicio > 0) log(`Retomando em "${retomar.aPartirDe}": ${inicio} etapas anter
 
 const totalFeatures = pendentes.reduce((n, m) => n + m.features.length, 0)
 const milestonesPendentes = pendentes.filter(m => !m.suite).length
-// por milestone: 2 conferências + 2 validadores; suíte final: 2 conferências + 1 validador
-const estimativa = 2 + 3 * totalFeatures + 4 * milestonesPendentes + 3
+// por feature: worker, revisão, commit e conferência; por milestone: 2 conferências + 2 validadores;
+// suíte final: 2 conferências + 1 validador
+const estimativa = 2 + 4 * totalFeatures + 4 * milestonesPendentes + 3
 log(`Estimativa mínima: ${estimativa} agentes (sem contar correções e retentativas)`)
 
 // agent() devolve null quando o modelo/API cai; nas Missions da Factory quase toda falha de worker foi assim.
@@ -325,6 +327,8 @@ function normalizar(a) {
   const raiz = unificar(preparo.raiz).replace(/\/+$/, '')
   return c.toLowerCase().startsWith(raiz.toLowerCase() + '/') ? c.slice(raiz.length + 1) : c
 }
+// Pasta nova aparece no `git status` como `novo/`: declarada assim, cobre os arquivos de dentro.
+const naLista = (arquivos, a) => arquivos.has(a) || [...arquivos].some(p => p.endsWith('/') && a.startsWith(p))
 
 function promptTrabalho(f, extra) {
   return comGuia(
@@ -342,7 +346,8 @@ function promptTrabalho(f, extra) {
 
 // Commit só depois da revisão aprovada; este agente nunca altera código.
 // Se cair depois de commitar, o commit é adotado apenas se for o único e tiver exatamente os arquivos da feature.
-// Devolve { commit, parar? }, { apontamento } ou { erro }. parar: motivo para parar logo depois do commit.
+// Devolve { commit, parar? }, { apontamento } ou { erro, semDiff? }. parar: motivo para parar depois de conferir o
+// commit. semDiff: o diff da feature não ficou pendente, então a parada não manda descartá-lo.
 async function commitar(f, arquivos, fase, antes) {
   const chamar = aviso => agent(
     `Faça UM commit atômico da feature "${f.titulo}", já revisada e aprovada. Arquivos da feature: ${[...arquivos].join(', ')}.\n` +
@@ -371,9 +376,10 @@ async function commitar(f, arquivos, fase, antes) {
       if (!c) return { erro: 'agente de commit caiu e não foi possível ler o repositório' }
       if (c.commits.length > 0) {
         // A lista só cresce e pode ter caminho revertido; o commit adotado precisa estar contido nela.
-        const mesmos = c.arquivos.length > 0 && c.arquivos.every(a => arquivos.has(normalizar(a)))
+        const mesmos = c.arquivos.length > 0 && c.arquivos.every(a => naLista(arquivos, normalizar(a)))
         if (c.branch === preparo.branch && arvoreLimpa(c) && c.commits.length === 1 && mesmos) return { commitado: true, commit: c.commits[0] }
-        return { erro: `agente de commit caiu deixando ${c.commits.length} commit(s) que não correspondem à feature revisada` }
+        return { erro: `agente de commit caiu deixando ${c.commits.length} commit(s) que não correspondem à feature ` +
+          `revisada (${c.commits.join(', ')}); pode haver commit de fora da missão` }
       }
       log(`commit: ${f.titulo}: agente não retornou (queda ou pulo manual), tentativa ${t + 1} de ${MAX_RETENTATIVAS_INFRA + 1}`)
       r = await chamar(aviso)
@@ -409,7 +415,51 @@ async function commitar(f, arquivos, fase, antes) {
       'declare-as em arquivos; se não, desfaça só elas' }
   }
   if (soDump(r)) return { erro: `o agente de commit não apagou o dump de crash do bash (${r.foraDaLista.join(', ')}); apague-o à mão` }
+  // Sem commit e sem causa conhecida: um commit de fora da missão (ex.: `git commit -a`) pode ter levado o diff.
+  const c = await lerGit(antes, fase)
+  if (c?.commits.length) {
+    return { semDiff: arvoreLimpa(c), erro: `o agente de commit não commitou (${r.motivo ?? 'sem motivo'}), e ${antes}..HEAD tem ` +
+      `commit de fora da missão: ${c.commits.join(', ')}, que pode ter levado o diff da feature. ${comoAceitar(c.head)}. ` +
+      `Se aceitar e o diff da feature foi junto, inclua também "${f.titulo}" em retomar.concluidas` }
+  }
   return { erro: r.motivo ?? 'commit não realizado' }
+}
+
+// Commits reais que a missão não fez, quando todos os dela estão lá: vieram de outra sessão ou automação.
+function commitsDeFora(c, esperados) {
+  if (!esperados.every(e => c.commits.some(s => mesmoSha(s, e)))) return []
+  return c.commits.filter(s => !esperados.some(e => mesmoSha(s, e)))
+}
+// A missão não decide pelo usuário se fica um commit que ela não revisou: diz como aceitá-lo na retomada.
+const aceitar = headReal => 'ponha em retomar.commits a saída de `git rev-list --reverse <retomar.base>..HEAD` e em ' +
+  `retomar.head o HEAD real, ${headReal}`
+const comoAceitar = headReal => `Para aceitá-lo, ${aceitar(headReal)}; para recusá-lo, tire-o do histórico e ajuste retomar ao git resultante`
+
+// Logo depois do commit de cada feature: `antes..HEAD` tem de ser exatamente o commit declarado, com arquivos da lista
+// revisada e árvore limpa. naoAdotar: o commit não entra no `retomar`, porque não está no git ou tem arquivo não
+// revisado; sem ajuste, a retomada recusa.
+async function conferirCommit(f, commit, antes, arquivos, fase) {
+  const c = await lerGit(antes, fase)
+  if (!c) return { motivo: `a conferência logo depois do commit de "${f.titulo}" não retornou; o commit declarado, ${commit}, entrou em retomar sem ser conferido` }
+  if (c.branch !== preparo.branch) return { motivo: `branch mudou para "${c.branch}" logo depois do commit de "${f.titulo}"` }
+  if (!c.commits.some(s => mesmoSha(s, commit))) {
+    return { naoAdotar: true, motivo: `o agente de commit declarou ${commit}, mas ${antes}..HEAD tem ` +
+      `${c.commits.join(', ') || 'nenhum commit'}; confira o git e ajuste retomar à mão` }
+  }
+  const deFora = commitsDeFora(c, [commit])
+  if (deFora.length) {
+    return { motivo: `commit de fora da missão logo depois da feature "${f.titulo}": ${deFora.join(', ')}. Em ${antes}..HEAD ` +
+      `só devia estar ${commit}, o commit da feature, que já entrou em retomar. ${comoAceitar(c.head)}` }
+  }
+  if (!mesmoSha(c.head, commit)) return { motivo: `HEAD real ${c.head} difere do commit declarado ${commit}` }
+  const alheios = c.arquivos.map(normalizar).filter(a => !naLista(arquivos, a))
+  if (alheios.length) {
+    return { naoAdotar: true, motivo: `o commit de "${f.titulo}", ${commit}, tem arquivos fora da lista revisada: ` +
+      `${alheios.join(', ')}. Ele ficou fora do retomar. Para aceitá-lo, ${aceitar(c.head)}, e inclua "${f.titulo}" em ` +
+      'retomar.concluidas; para recusá-lo, tire-o do histórico e retome sem mudar o retomar, e a feature se repete' }
+  }
+  if (!arvoreLimpa(c)) return { motivo: `árvore com mudanças não commitadas depois do commit de "${f.titulo}"${pendenciasDe(c)}` }
+  return {}
 }
 
 // Em série, como na Mission: cada feature parte do commit da anterior.
@@ -435,7 +485,8 @@ async function implementar(features, fase) {
       const c = await lerGit(antes, fase)
       if (!c) return { ok: false, semLeitura: true }
       if (c.branch !== preparo.branch || !mesmoSha(c.head, antes) || c.commits.length > 0) {
-        return { ok: false, motivo: `branch ${c.branch}, HEAD ${c.head}, ${c.commits.length} commit(s) novo(s)` }
+        return { ok: false, head: c.head, motivo: `branch ${c.branch}, HEAD ${c.head}, ${c.commits.length} commit(s) novo(s)` +
+          (c.commits.length ? `: ${c.commits.join(', ')}` : '') }
       }
       if (!arvoreLimpa(c)) parcial = true
       return { ok: true }
@@ -444,7 +495,9 @@ async function implementar(features, fase) {
       const e = r.semRetentativa
       return falhou(e.semLeitura
         ? 'agente caiu e não foi possível ler o repositório para decidir se era seguro repetir'
-        : `agente caiu e mexeu no histórico (${e.motivo}). Desfaça isso para repetir a feature`)
+        : `agente caiu e o histórico mudou (${e.motivo}), por commit dele ou de fora da missão. Desfaça isso para ` +
+          `repetir a feature. Se for commit de fora e quiser aceitá-lo, ${aceitar(e.head)}, descartando o diff parcial ` +
+          'da feature, se houver')
     }
     if (!r) return falhou(`agente não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas.${sujo}`)
     if (!r.concluida) return falhou(r.resumo + sujo)
@@ -480,7 +533,7 @@ async function implementar(features, fase) {
       if (rev.aprovado) {
         const c = await commitar(f, arquivos, fase, antes)
         if (c.commit) { commit = c.commit; pararDepois = c.parar; break }
-        if (c.erro) return falhou(c.erro + '.' + sujo)
+        if (c.erro) return falhou(c.semDiff ? c.erro : c.erro + '.' + sujo)
         problemas = [c.apontamento]
       } else {
         if (rev.problemas.length === 0) return falhou('revisão da feature reprovou sem apontar problemas.' + sujo)
@@ -504,9 +557,14 @@ async function implementar(features, fase) {
       anteriores = problemas
     }
 
-    head = commit
-    commits.push(commit)
-    resultados.push({ feature: f.titulo, ...r, commit, rodadasRevisao: rodada })
+    // Commit de outra sessão no meio da missão para aqui, antes da próxima feature, e não só no fim do milestone.
+    const pos = await conferirCommit(f, commit, antes, arquivos, fase)
+    if (!pos.naoAdotar) {
+      head = commit
+      commits.push(commit)
+      resultados.push({ feature: f.titulo, ...r, commit, rodadasRevisao: rodada })
+    }
+    if (pos.motivo) return falhou(pararDepois ? `${pararDepois}. ${pos.motivo}` : pos.motivo)
     if (pararDepois) return falhou(`${pararDepois}. O commit da feature, ${commit}, já entrou em retomar: decida à mão antes de retomar`)
   }
   return { resultados, commits }
@@ -527,6 +585,8 @@ async function conferir(base, esperados, fase = 'Validar') {
   const c = await lerGit(base, fase)
   if (!c) return { ok: false, semLeitura: true, motivo: 'conferência não retornou' }
   if (c.branch !== preparo.branch) return { ok: false, motivo: `branch mudou para "${c.branch}"` }
+  const deFora = commitsDeFora(c, esperados)
+  if (deFora.length) return { ok: false, motivo: `commit de fora da missão em ${base}..HEAD: ${deFora.join(', ')}. ${comoAceitar(c.head)}` }
   if (!arvoreLimpa(c)) return { ok: false, motivo: `árvore com mudanças não commitadas${pendenciasDe(c)}` }
   if (!mesmoSha(c.head, head)) return { ok: false, motivo: `HEAD real ${c.head} difere do declarado ${head}` }
   const bate = c.commits.length === esperados.length && c.commits.every((s, i) => mesmoSha(s, esperados[i]))
