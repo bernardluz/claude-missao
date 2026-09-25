@@ -431,6 +431,8 @@ const estimativa = 2 + (retomar ? 1 : 0) + (retomar?.contexto ? 0 : 1) + 4 * tot
 log(`Estimativa mínima: ${estimativa} agentes a partir daqui (sem contar correções e retentativas)`)
 
 const relatorio = []
+// Commits de fora aceitos (não impactam a missão), levados no retomar: não contam como da missão.
+const deForaAceitos = Array.isArray(args.retomar?.deFora) ? args.retomar.deFora.filter(s => typeof s === 'string') : []
 // Bugs que a caça confirmou e a missão corrigiu: confirmado de novo, para a missão.
 const bugsCorrigidos = []
 // Critérios de aceite com a evidência de cada um, preenchidos ao fim.
@@ -590,7 +592,8 @@ function commitsDeFora(c, esperados) {
   if (!esperados.every(e => c.commits.some(s => mesmoSha(s, e)))) return []
   return c.commits.filter(s => !esperados.some(e => mesmoSha(s, e)))
 }
-// Arquivos que a missão commitou nesta execução e os do milestone atual: base para julgar commit de fora.
+// Arquivos que a missão commitou (na retomada, recuperados do git) e os do milestone atual: base para julgar commit de
+// fora.
 const arquivosDaMissao = new Set()
 let arquivosDoMilestone = new Set()
 
@@ -619,7 +622,10 @@ async function julgarDeFora(c, deFora, fase, emCurso = []) {
     { label: 'commit de fora', phase: fase, schema: DE_FORA, model: CONFIG.modeloCommitDeFora, effort: 'low' },
   ))
   if (!r) return { impacta: true, motivo: 'O agente que julga commit de fora não respondeu' }
-  if (!r.impacta) log(`commit de fora aceito, não impacta a missão: ${deFora.join(', ')}. ${r.motivo}`)
+  if (!r.impacta) {
+    deForaAceitos.push(...deFora)
+    log(`commit de fora aceito, não impacta a missão: ${deFora.join(', ')}. ${r.motivo}`)
+  }
   return r
 }
 
@@ -1054,7 +1060,7 @@ function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
     parouEm: m.titulo, ...extra, plano: { milestones }, contexto, aprendizados: contexto.aprendizados,
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos] },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1065,28 +1071,38 @@ for (const [i, m] of pendentes.entries()) {
   const jaConcluidas = retomando ? retomar.concluidas ?? [] : []
   const feitas = []
   const commits = retomando ? [...retomar.commits] : []
+  arquivosDoMilestone = new Set()
   if (retomando) {
     // Só retoma se o repositório está exatamente como a execução anterior deixou: nada de commit alheio no intervalo.
-    const c = await lerGit(base, 'Preparar')
+    // Lê a missão inteira (INICIO_MISSAO..HEAD) para também recuperar os arquivos que ela já commitou.
+    const c = await lerGit(INICIO_MISSAO, 'Preparar')
     const esperado = retomar.commits
-    const intacto = c && c.branch === preparo.branch && (!retomar.branch || c.branch === retomar.branch) && mesmoSha(c.head, retomar.head) && mesmoSha(c.head, head) &&
-      c.commits.length === esperado.length && c.commits.every((s, j) => mesmoSha(s, esperado[j])) &&
+    const desde = !c ? -1 : mesmoSha(base, INICIO_MISSAO) ? 0 : c.commits.findIndex(s => mesmoSha(s, base)) + 1
+    const doMilestone = c && (desde > 0 || mesmoSha(base, INICIO_MISSAO)) ? c.commits.slice(desde) : null
+    const intacto = c && doMilestone && c.branch === preparo.branch && (!retomar.branch || c.branch === retomar.branch) && mesmoSha(c.head, retomar.head) && mesmoSha(c.head, head) &&
+      doMilestone.length === esperado.length && doMilestone.every((s, j) => mesmoSha(s, esperado[j])) &&
       (esperado.length > 0 || mesmoSha(base, head))
     if (!intacto) {
       // Devolve o `retomar` recebido, intacto, para o usuário ajustar e tentar de novo.
       return { ...parar(m, base, feitas, [], {
         motivo: c
-          ? `repositório mudou desde a parada (branch ${c.branch}, esperada ${retomar.branch ?? preparo.branch}; HEAD ${c.head}, esperado ${retomar.head}; ${c.commits.length} commits em ` +
+          ? `repositório mudou desde a parada (branch ${c.branch}, esperada ${retomar.branch ?? preparo.branch}; HEAD ${c.head}, esperado ${retomar.head}; ${doMilestone?.length ?? 'base fora da missão, nenhum'} commits em ` +
             `${base}..HEAD, esperados ${esperado.length}). Desfaça as mudanças ou, se forem da missão, atualize ` +
             'retomar.head, retomar.commits e retomar.concluidas antes de retomar'
           : 'não foi possível ler o repositório para retomar',
       }, jaConcluidas), retomar }
     }
+    // Arquivos que a missão já commitou, sem os dos commits de fora aceitos: commit de fora que tocar um deles para.
+    for (const s of c.commits.filter(s => !deForaAceitos.some(d => mesmoSha(d, s)))) {
+      for (const a of (c.arquivosPorCommit?.[s] ?? []).map(normalizar)) {
+        arquivosDaMissao.add(a)
+        if (doMilestone.includes(s)) arquivosDoMilestone.add(a)
+      }
+    }
     log(`Retomando "${m.titulo}" sobre ${base}: ${esperado.length} commits anteriores, ${jaConcluidas.length} itens ` +
-      `concluídos; orçamento de correções recomeça em ${MAX_RODADAS_CORRECAO} rodadas`)
+      `concluídos, ${arquivosDaMissao.size} arquivos já tocados pela missão; orçamento de correções recomeça em ${MAX_RODADAS_CORRECAO} rodadas`)
   }
   const aFazer = m.features.filter(f => !jaConcluidas.includes(f.titulo))
-  arquivosDoMilestone = new Set()
   log(m.suite ? 'Suíte completa do projeto' : `Milestone: ${m.titulo} (${aFazer.length} de ${m.features.length} features a implementar)`)
   const pararAqui = extra => {
     if (extra.motivo) log(`Parando em "${m.titulo}": ${extra.motivo}`)

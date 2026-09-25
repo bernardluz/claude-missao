@@ -885,3 +885,30 @@ describe('caça final e aceite', () => {
     await assert.rejects(rodar(plano({ aceite: 'tudo' })), /args inválido/)
   })
 })
+
+describe('revisão: retomada e commits de fora', () => {
+  test('na retomada, commit de fora que toca arquivo de milestone anterior para, sem consultar o agente', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { validacao: [0, 2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'M2')
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {
+      commitDeFora: { 'revisão: M2': 'fora0001' }, arquivosDeFora: ['x/a.js'], foraImpacta: false,
+    }, estado)
+    assert.equal(p2.resultado.parouEm, 'M2')
+    assert.match(p2.resultado.motivo, /toca arquivo da missão: x\/a\.js$/)
+    assert.equal(p2.contar('commit de fora'), 0)
+    assert.match(p2.prompt('conferência'), /git-estado\.mjs base0000`/)
+  })
+
+  test('commit de fora aceito vai no retomar e não conta como arquivo da missão na retomada', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['z/fora.js'], foraImpacta: false, validacao: [0, 2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'M2')
+    assert.deepEqual(p1.resultado.retomar.deFora, ['fora0001'])
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {
+      commitDeFora: { 'revisão: M2': 'fora0002' }, arquivosDeFora: ['z/fora.js'], foraImpacta: false,
+    }, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('commit de fora'), 1)
+  })
+})

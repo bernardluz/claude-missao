@@ -105,7 +105,10 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       const base = prompt.match(/git-estado\.mjs (\S+)`/)[1]
       const commits = base === 'HEAD' ? [] : estado.git.slice(estado.git.indexOf(base) + 1)
       const deFora = s => !/^sha\d+$/.test(s)
-      const arquivosPorCommit = Object.fromEntries(commits.map(s => [s, deFora(s) ? arquivosDeFora : arquivosGit]))
+      // Os arquivos de cada commit ficam gravados no estado na primeira leitura, como no git real entre execuções.
+      estado.porSha ??= {}
+      for (const s of commits) estado.porSha[s] ??= deFora(s) ? arquivosDeFora : arquivosGit
+      const arquivosPorCommit = Object.fromEntries(commits.map(s => [s, estado.porSha[s]]))
       return {
         saida: cerca(JSON.stringify({
           branch: l === 'preparo' ? 'develop' : o.branchNaConferencia ?? 'develop', head: estado.git.at(-1), raiz,
