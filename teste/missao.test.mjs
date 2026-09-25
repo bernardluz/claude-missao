@@ -788,7 +788,7 @@ describe('prova de contrato, caça bug e user testing por milestone', () => {
     assert.ok(ordem.indexOf('commit: correção 1.2 (M1)') < ordem.lastIndexOf('revisão: M1'))
     assert.ok(ordem.lastIndexOf('revisão: M1') < ordem.indexOf('caça: autorização (M1, rodada 2)'))
     assert.equal(r.contar('caça: autorização (M1, rodada 3)'), 0)
-    assert.match(r.prompt('caça: autorização (M1, rodada 2)'), /Já corrigidos nesta missão .*: x\/a\.js bug 1\.1/)
+    assert.match(r.prompt('caça: autorização (M1, rodada 2)'), /Já corrigidos nesta missão [^\n]*\n1\. x\/a\.js bug 1\.1/)
     assert.match(r.prompt('verificação 1: achado 1 (M1, rodada 1)'), /Tente refutar este possível bug .*: x\/a\.js bug 1\.1/)
   })
 
@@ -963,7 +963,7 @@ describe('revisão: estado que atravessa a retomada', () => {
     assert.equal(p1.resultado.parouEm, 'M2')
     assert.deepEqual(p1.resultado.retomar.bugsCorrigidos, ['x/a.js bug 1.1'])
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), { caca: { M2: [1] }, cacaRepete: { M2: 1 } }, estado)
-    assert.match(p2.prompt('caça: geral (M2, rodada 1)'), /Já corrigidos nesta missão .*: x\/a\.js bug 1\.1/)
+    assert.match(p2.prompt('caça: geral (M2, rodada 1)'), /Já corrigidos nesta missão [^\n]*\n1\. x\/a\.js bug 1\.1/)
     assert.match(p2.resultado.motivo, /confirmou de novo bug já corrigido/)
   })
 })
@@ -1074,5 +1074,32 @@ describe('filtro de aprendizados da execução', () => {
   test('sem aprendizados, sem sugestão', async () => {
     const r = await rodar(plano())
     assert.equal(r.resultado.sugestaoAprendizados, null)
+  })
+})
+
+describe('repete só vale apontando item existente da lista de corrigidos', () => {
+  const comEtapas = () => ({ milestones: [{ titulo: 'M1', criterio: 'c', caca: ['geral'], features: [{ titulo: 'F1', spec: 's' }] }] })
+
+  test('repete com a lista de corrigidos vazia vira correção, como bug novo', async () => {
+    const r = await rodar(comEtapas(), { caca: { M1: [1] }, cacaRepete: { M1: 1 } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('commit: correção 1.1 (M1)'), 1)
+    assert.ok(r.logs.some(l => /marcado como repetido sem item válido .*tratado como bug novo: x\/a\.js bug 1\.1/.test(l)))
+  })
+
+  test('repete sem apontar item, ou apontando item que não existe, também vira correção', async () => {
+    for (const cacaRepeteItem of [null, 5]) {
+      const r = await rodar(comEtapas(), { caca: { M1: [1, 1] }, cacaRepete: { M1: 2 }, cacaRepeteItem })
+      assert.equal(r.resultado.concluido, true, String(cacaRepeteItem))
+      assert.equal(r.contar('commit: correção 2.1 (M1)'), 1, String(cacaRepeteItem))
+    }
+  })
+
+  test('repete apontando item existente para a missão, com o bug repetido no motivo', async () => {
+    const r = await rodar(comEtapas(), { caca: { M1: [1, 1] }, cacaRepete: { M1: 2 }, cacaRepeteItem: 1 })
+    assert.equal(r.resultado.parouEm, 'M1')
+    assert.match(r.resultado.motivo, /confirmou de novo bug já corrigido/)
+    assert.equal(r.resultado.problemas[0].repetido, 'x/a.js bug 1.1')
+    assert.match(r.prompt('caça: geral (M1, rodada 2)'), /o número dele\):\n1\. x\/a\.js bug 1\.1/)
   })
 })

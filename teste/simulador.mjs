@@ -46,7 +46,8 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   contratoFalso      { [milestone]: [premissas] } premissas que a prova de contrato devolve (use confere: false)
 //   areasCaca          áreas que o agente barato deriva quando o milestone não traz caca (padrão ['geral'])
 //   caca               { [milestone]: [n achados por rodada, por caçador] }
-//   cacaRepete         { [milestone]: rodada } nessa rodada os achados repetem bug já corrigido
+//   cacaRepete         { [milestone]: rodada } nessa rodada o caçador marca os achados como repetidos
+//   cacaRepeteItem     número do item da lista de corrigidos que o caçador aponta (padrão 1; null para não apontar)
 //   refuta             o segundo verificador refuta todos os achados
 //   userTesting        { [milestone]: [n falhas por rodada] } resultado do user testing
 //   foraImpacta     resposta do agente que julga commit de fora (padrão true: para como antes)
@@ -149,7 +150,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (caca) {
       const [, m, r] = caca
       const n = (o.caca?.[m] ?? [])[Number(r) - 1] ?? 0
-      return { achados: Array.from({ length: n }, (_, i) => ({ arquivo: 'x/a.js', problema: `bug ${r}.${i + 1}`, repete: o.cacaRepete?.[m] === Number(r) && /Já corrigidos nesta missão/.test(prompt) })) }
+      return { achados: Array.from({ length: n }, (_, i) => ({ arquivo: 'x/a.js', problema: `bug ${r}.${i + 1}`, ...(o.cacaRepete?.[m] === Number(r) ? { repete: true, repeteItem: 'cacaRepeteItem' in o ? o.cacaRepeteItem : 1 } : {}) })) }
     }
     if (l.startsWith('verificação ')) return { confirmado: !(o.refuta && l.startsWith('verificação 2')), motivo: 'reproduzido' }
     if (l === 'aceite') {

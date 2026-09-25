@@ -971,7 +971,11 @@ const ACHADOS = {
       type: 'array',
       items: {
         type: 'object',
-        properties: { arquivo: { type: 'string' }, problema: { type: 'string' }, repete: { type: 'boolean' } },
+        properties: {
+          arquivo: { type: 'string' }, problema: { type: 'string' }, repete: { type: 'boolean' },
+          // Número do item da lista "Já corrigidos" que este achado repete.
+          repeteItem: { type: 'integer' },
+        },
         required: ['problema'],
       },
     },
@@ -1025,7 +1029,8 @@ const textoDoAchado = a => `${a.arquivo ?? ''} ${a.problema}`.trim()
 // confirmam. Devolve { confirmados } ou { erro }.
 async function cacar(rotulo, areas, intervalo, foco, corrigidos, guias) {
   const jaCorrigidos = corrigidos.length
-    ? `\nJá corrigidos nesta missão (achou um deles de novo? marque repete=true): ${corrigidos.join(' | ')}`
+    ? '\nJá corrigidos nesta missão (achou um deles de novo? marque repete=true e, em repeteItem, o número dele):\n' +
+      corrigidos.map((b, i) => `${i + 1}. ${b}`).join('\n')
     : ''
   const porArea = await parallel(areas.map(area => () => comRetentativa(`caça: ${area} (${rotulo})`, () => trabalhar(montar('caca-bug',
     `Cace bugs reais no diff \`git diff ${intervalo}\`, na área: ${area}. ${foco}${jaCorrigidos}\n` +
@@ -1034,7 +1039,14 @@ async function cacar(rotulo, areas, intervalo, foco, corrigidos, guias) {
     { label: `caça: ${area} (${rotulo})`, phase: 'Caça bug', schema: ACHADOS },
   ))))
   if (porArea.some(r => !r)) return { erro: `um caçador de bugs (${rotulo}) não respondeu` }
-  const achados = porArea.flatMap(r => r.achados)
+  // repete só vale apontando um item que existe na lista de corrigidos; senão o achado é bug novo e vai para correção.
+  const achados = porArea.flatMap(r => r.achados).map(a => {
+    if (!a.repete) return a
+    const valido = Number.isInteger(a.repeteItem) && a.repeteItem >= 1 && a.repeteItem <= corrigidos.length
+    if (valido) return { ...a, repete: true, repetido: corrigidos[a.repeteItem - 1] }
+    log(`caça (${rotulo}): achado marcado como repetido sem item válido da lista de corrigidos; tratado como bug novo: ${textoDoAchado(a)}`)
+    return { ...a, repete: false }
+  })
   const vereditos = await parallel(achados.map((a, i) => () => parallel([1, 2].map(n => () =>
     comRetentativa(`verificação ${n}: achado ${i + 1} (${rotulo})`, () => trabalhar(montar('caca-bug',
       `Tente refutar este possível bug em \`git diff ${intervalo}\`: ${textoDoAchado(a)}\n` +
