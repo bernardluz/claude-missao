@@ -78,6 +78,11 @@ const CONFIG_PROJETO = {}
 // @etapas-inicio (substituído por instalar.mjs)
 const ETAPAS = {}
 // @etapas-fim
+// Aprendizados duráveis do projeto, embutidos por instalar.mjs a partir de .claude/missao/aprendizados.md. Vão em todo
+// prompt de etapa, antes dos aprendizados desta execução. No núcleo cru fica vazio.
+// @aprendizados-inicio (substituído por instalar.mjs)
+const APRENDIZADOS_PROJETO = ''
+// @aprendizados-fim
 const AJUSTAVEIS_POR_EXECUCAO = ['formatoCommit', 'idioma', 'exemplosSkills']
 {
   const negadas = Object.keys(args?.config ?? {}).filter(k => !AJUSTAVEIS_POR_EXECUCAO.includes(k))
@@ -338,6 +343,7 @@ function montar(etapa, tarefa, areas = []) {
   const partes = []
   if (ETAPAS[etapa]) partes.push(`Técnica da etapa ${etapa} (orientação; regras do repo prevalecem):\n${ETAPAS[etapa]}`)
   if (areas.length) partes.push('Contexto do plano (orientação; regras do repo prevalecem):\n' + areas.map(s => `### ${s.nome}\n${s.guia}`).join('\n\n'))
+  if (APRENDIZADOS_PROJETO) partes.push(`Aprendizados do projeto:\n${APRENDIZADOS_PROJETO}`)
   if (contexto.aprendizados.length) partes.push(`Aprendizados desta missão:\n- ${contexto.aprendizados.join('\n- ')}`)
   const final = `${tarefa}\n${APRENDER}`
   return partes.length ? `${partes.join('\n\n')}\n\nSe algo acima contrariar as proibições da tarefa, as proibições vencem.\n\n${final}` : final

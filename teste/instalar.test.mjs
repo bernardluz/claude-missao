@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { gerar, instalar, chavesAceitas, lerEtapas, NUCLEO, SKILL, ETAPAS_DIR } from '../instalar.mjs'
+import { gerar, instalar, chavesAceitas, lerEtapas, lerAprendizados, NUCLEO, SKILL, ETAPAS_DIR } from '../instalar.mjs'
 import { executar, plano } from './simulador.mjs'
 
 const nucleo = readFileSync(NUCLEO, 'utf8')
@@ -236,4 +236,18 @@ test('git-estado.mjs no modo compacto une os arquivos da missão sem os commits 
   assert.deepEqual(e.arquivosDoMilestone, ['m2/b.txt'])
   assert.deepEqual(e.contagem, { commits: 3, arquivos: 2, arquivosDoMilestone: 1, pendencias: e.pendencias.length })
   assert.deepEqual(rodar(inicio, '--resumo', inicio).arquivosDoMilestone, ['m1/a.txt', 'fora/x.txt', 'm2/b.txt'])
+})
+
+test('embute .claude/missao/aprendizados.md (BOM e CRLF tratados) e a verificação acusa mudança nele', () => {
+  const raiz = projetoTemporario()
+  const arquivo = join(raiz, '.claude', 'missao', 'aprendizados.md')
+  mkdirSync(dirname(arquivo), { recursive: true })
+  writeFileSync(arquivo, '﻿- Rode com forks=1.\r\n- Banking devolve 404 sem acesso.\r\n')
+  assert.equal(lerAprendizados(raiz), '- Rode com forks=1.\n- Banking devolve 404 sem acesso.')
+  const { destino } = instalar(raiz)
+  assert.ok(readFileSync(destino, 'utf8').includes(`const APRENDIZADOS_PROJETO = ${JSON.stringify(lerAprendizados(raiz))}`))
+  assert.equal(instalar(raiz, { verificar: true }).atualizado, true)
+  writeFileSync(arquivo, '- Outro.\n')
+  assert.equal(instalar(raiz, { verificar: true }).atualizado, false)
+  assert.equal(lerAprendizados(projetoTemporario()), '')
 })

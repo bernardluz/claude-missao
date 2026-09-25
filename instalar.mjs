@@ -2,7 +2,8 @@
 // Lê <projeto>/.claude/missao.config.json (opcional) e gera <projeto>/.claude/workflows/missao.js
 // com a configuração embutida em CONFIG_PROJETO. Copia também, sem alterar, os arquivos de COPIAS: a skill
 // missao-traycer (lê a configuração do projeto ao rodar), a skill criar-spec-simples e o script de estado do git que a
-// conferência roda. Embute a técnica de cada etapa (etapas/ + .claude/missao/etapas/ do projeto) em ETAPAS.
+// conferência roda. Embute a técnica de cada etapa (etapas/ + .claude/missao/etapas/ do projeto) em ETAPAS e os
+// aprendizados do projeto (.claude/missao/aprendizados.md) em APRENDIZADOS_PROJETO.
 //
 // Uso:
 //   node instalar.mjs <caminho-do-projeto>              gera ou atualiza a cópia instalada
@@ -26,6 +27,7 @@ export const COPIAS = [
 const MARCA_COPIA = '`claude-missao`'
 const BLOCO = /\/\/ @config-inicio[^\n]*\nconst CONFIG_PROJETO = [\s\S]*?\n\/\/ @config-fim/
 const BLOCO_ETAPAS = /\/\/ @etapas-inicio[^\n]*\nconst ETAPAS = [\s\S]*?\n\/\/ @etapas-fim/
+const BLOCO_APRENDIZADOS = /\/\/ @aprendizados-inicio[^\n]*\nconst APRENDIZADOS_PROJETO = [\s\S]*?\n\/\/ @aprendizados-fim/
 const MARCA = 'gerado por claude-missao'
 // Sem BOM e com LF: arquivo salvo no Windows não pode esconder o marcador <!-- substitui -->.
 const lf = texto => texto.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
@@ -35,6 +37,12 @@ const lf = texto => texto.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
 export const ETAPAS_DIR = join(aqui, 'etapas')
 const SUBSTITUI = '<!-- substitui -->'
 const mds = dir => readdirSync(dir).filter(n => n.endsWith('.md')).map(n => n.slice(0, -3)).sort()
+// Aprendizados duráveis do projeto (técnicas e armadilhas), mantidos pelo agente pai em .claude/missao/aprendizados.md.
+export function lerAprendizados(raizProjeto) {
+  const arquivo = join(raizProjeto, '.claude', 'missao', 'aprendizados.md')
+  return existsSync(arquivo) ? lf(readFileSync(arquivo, 'utf8')).trim() : ''
+}
+
 export function lerEtapas(raizProjeto) {
   const etapas = Object.fromEntries(mds(ETAPAS_DIR).map(n => [n, lf(readFileSync(join(ETAPAS_DIR, `${n}.md`), 'utf8')).trim()]))
   const dirProjeto = raizProjeto ? join(raizProjeto, '.claude', 'missao', 'etapas') : null
@@ -63,7 +71,7 @@ const TIPO_OK = {
   lista: v => Array.isArray(v),
 }
 
-export function gerar(nucleo, config, origem = '', etapas = lerEtapas()) {
+export function gerar(nucleo, config, origem = '', etapas = lerEtapas(), aprendizados = '') {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('a configuração deve ser um objeto JSON')
   nucleo = lf(nucleo)
   const tipos = padraoDoNucleo(nucleo)
@@ -73,11 +81,14 @@ export function gerar(nucleo, config, origem = '', etapas = lerEtapas()) {
   if (tipoErrado.length) throw new Error(`tipo inválido na configuração: ${tipoErrado.map(k => `${k} (esperado ${tipos[k]})`).join(', ')}`)
   if (!BLOCO.test(nucleo)) throw new Error('marcadores @config-inicio/@config-fim não encontrados no núcleo')
   if (!BLOCO_ETAPAS.test(nucleo)) throw new Error('marcadores @etapas-inicio/@etapas-fim não encontrados no núcleo')
+  if (!BLOCO_APRENDIZADOS.test(nucleo)) throw new Error('marcadores @aprendizados-inicio/@aprendizados-fim não encontrados no núcleo')
   const cabecalho = `// @config-inicio (${MARCA}${origem ? ` ${origem}` : ''}; edite .claude/missao.config.json e reinstale)`
   return nucleo
     .replace(BLOCO, () => `${cabecalho}\nconst CONFIG_PROJETO = ${JSON.stringify(config, null, 2)}\n// @config-fim`)
     .replace(BLOCO_ETAPAS, () => '// @etapas-inicio (etapas/ do claude-missao + .claude/missao/etapas/ do projeto; reinstale)\n' +
       `const ETAPAS = ${JSON.stringify(etapas, null, 2)}\n// @etapas-fim`)
+    .replace(BLOCO_APRENDIZADOS, () => '// @aprendizados-inicio (.claude/missao/aprendizados.md do projeto; reinstale)\n' +
+      `const APRENDIZADOS_PROJETO = ${JSON.stringify(aprendizados)}\n// @aprendizados-fim`)
 }
 
 // A linha de origem muda a cada commit do claude-missao; a verificação compara só o conteúdo.
@@ -98,7 +109,7 @@ export function instalar(projeto, { verificar = false, forcar = false } = {}) {
   if (!existsSync(join(raiz, '.git'))) throw new Error(`${raiz} não parece ser a raiz de um repositório git`)
   const arquivoConfig = join(raiz, '.claude', 'missao.config.json')
   const config = existsSync(arquivoConfig) ? JSON.parse(readFileSync(arquivoConfig, 'utf8')) : {}
-  const gerado = gerar(readFileSync(NUCLEO, 'utf8'), config, origemAtual(), lerEtapas(raiz))
+  const gerado = gerar(readFileSync(NUCLEO, 'utf8'), config, origemAtual(), lerEtapas(raiz), lerAprendizados(raiz))
   const destino = join(raiz, '.claude', 'workflows', 'missao.js')
   const copias = COPIAS.map(([origem, relativo]) => ({ destino: join(raiz, relativo), conteudo: lf(readFileSync(origem, 'utf8')) }))
   const lerLf = arquivo => (existsSync(arquivo) ? lf(readFileSync(arquivo, 'utf8')) : null)

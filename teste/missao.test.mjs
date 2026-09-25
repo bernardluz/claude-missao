@@ -2,7 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { executar, carregar, plano, DUMP } from './simulador.mjs'
 import { readFileSync } from 'node:fs'
-import { NUCLEO, gerar } from '../instalar.mjs'
+import { NUCLEO, gerar, lerEtapas } from '../instalar.mjs'
 
 const fonte = carregar(NUCLEO)
 const rodar = (args, opcoes, estado) => executar(fonte, args, opcoes, estado)
@@ -1020,5 +1020,35 @@ describe('revisão: suíte final e commits de fora', () => {
     assert.match(r.prompt('suíte completa'), /Os commits fora0001 são de fora da missão: não peça correção do código deles/)
     const sem = await rodar(plano())
     assert.doesNotMatch(sem.prompt('suíte completa'), /são de fora da missão/)
+  })
+})
+
+describe('aprendizados do projeto embutidos', () => {
+  const comAprendizados = (texto, args, opcoes) =>
+    executar(gerar(readFileSync(NUCLEO, 'utf8'), {}, '', lerEtapas(), texto).replace('export const meta', 'const meta'), args, opcoes)
+  const comJornada = () => ({
+    milestones: [
+      { titulo: 'M1', criterio: 'c', userTesting: 'abre e salva', features: [{ titulo: 'F1', spec: 's' }] },
+      { titulo: 'M2', criterio: 'c', features: [{ titulo: 'F2', spec: 's' }] },
+    ],
+  })
+
+  test('vão em todo prompt de worker, antes dos aprendizados da execução', async () => {
+    const r = await comAprendizados('- Rode os testes com forks=1.', comJornada(), {
+      caca: { M1: [1] }, aprendizados: { F1: ['o serviço X devolve 404 sem acesso'] },
+    })
+    assert.equal(r.resultado.concluido, true)
+    for (const label of ['pré-voo', 'contrato: M1', 'F1', 'revisão: F1', 'revisão: M1', 'testes: M1', 'caça: geral (M1, rodada 1)',
+      'verificação 1: achado 1 (M1, rodada 1)', 'correção 1.1 (M1)', 'user testing: M1', 'suíte completa', 'aceite']) {
+      assert.match(r.prompt(label), /Aprendizados do projeto:\n- Rode os testes com forks=1\./, label)
+    }
+    const p = r.prompt('F2')
+    assert.ok(p.indexOf('Aprendizados do projeto:') < p.indexOf('Aprendizados desta missão:'))
+    assert.doesNotMatch(r.prompt('commit: F1'), /Aprendizados do projeto/)
+  })
+
+  test('sem aprendizados.md, nenhuma seção', async () => {
+    const r = await comAprendizados('', plano())
+    assert.doesNotMatch(r.prompt('F1'), /Aprendizados do projeto/)
   })
 })
