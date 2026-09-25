@@ -50,6 +50,9 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   refuta             o segundo verificador refuta todos os achados
 //   userTesting        { [milestone]: [n falhas por rodada] } resultado do user testing
 //   foraImpacta     resposta do agente que julga commit de fora (padrão true: para como antes)
+//   conferenciaErro    texto de erro que o agente de conferência sempre devolve (ex.: erro do git)
+//   conferenciaResumida vezes que a conferência devolve só o último commit, com a contagem real
+//   conferenciaSemPorCommit vezes que a conferência omite arquivosPorCommit
 //   conferenciaComCerca o agente de conferência devolve o JSON dentro de cerca de código
 //   conferenciaInvalida vezes que o agente de conferência devolve texto em vez da saída do git-estado.mjs
 export const DUMP = 'bash.exe.stackdump'
@@ -72,6 +75,8 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   const arquivosGit = o.arquivosGit ?? arquivos
   const arquivosDeFora = o.arquivosDeFora ?? ['z/fora.js']
   let invalida = o.conferenciaInvalida ?? 0
+  let resumida = o.conferenciaResumida ?? 0
+  let semPorCommit = o.conferenciaSemPorCommit ?? 0
   let rodadaValidacao = 0
   let rodadaSuite = 0
   const rodadaUT = {}
@@ -99,6 +104,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (l === 'planejar') return { milestones: o.planoGerado ?? plano().milestones }
     if (l === 'pré-voo') return { ok: !o.preVooFalta, faltando: o.preVooFalta ?? [] }
     if (l === 'preparo' || l === 'conferência') {
+      if (o.conferenciaErro) return { saida: o.conferenciaErro }
       if (invalida > 0) { invalida--; return { saida: 'o repositório tem 3 commits novos e está limpo' } }
       const cerca = o.conferenciaComCerca ? s => `Saída:\n\`\`\`json\n${s}\n\`\`\`` : s => s
       // Como o git-estado.mjs: `HEAD` como base dá intervalo vazio.
@@ -109,13 +115,15 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       estado.porSha ??= {}
       for (const s of commits) estado.porSha[s] ??= deFora(s) ? arquivosDeFora : arquivosGit
       const arquivosPorCommit = Object.fromEntries(commits.map(s => [s, estado.porSha[s]]))
-      return {
-        saida: cerca(JSON.stringify({
-          branch: l === 'preparo' ? 'develop' : o.branchNaConferencia ?? 'develop', head: estado.git.at(-1), raiz,
-          limpo: limpo(), pendencias: pendencias(), commits,
-          arquivos: [...new Set(commits.flatMap(s => arquivosPorCommit[s]))], arquivosPorCommit,
-        })),
+      const arquivosDoIntervalo = [...new Set(commits.flatMap(s => arquivosPorCommit[s]))]
+      const contagem = { commits: commits.length, arquivos: arquivosDoIntervalo.length, pendencias: pendencias().length }
+      const saida = {
+        branch: l === 'preparo' ? 'develop' : o.branchNaConferencia ?? 'develop', head: estado.git.at(-1), raiz,
+        limpo: limpo(), pendencias: pendencias(), commits, arquivos: arquivosDoIntervalo, arquivosPorCommit, contagem,
       }
+      if (resumida > 0 && commits.length > 1) { resumida--; saida.commits = [commits.at(-1)] }
+      if (semPorCommit > 0) { semPorCommit--; delete saida.arquivosPorCommit }
+      return { saida: cerca(JSON.stringify(saida)) }
     }
     if (l === 'suíte completa') {
       if (o.suiteAmbiente) return { aprovado: false, problemas: [{ problema: 'Docker fora do ar', ambiente: true }] }

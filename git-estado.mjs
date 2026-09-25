@@ -4,7 +4,8 @@
 //
 // Uso: node .claude/missao/git-estado.mjs <base>
 // Saída: { head, branch, raiz, limpo, pendencias[], commits[] (base..HEAD, do mais antigo ao mais novo, SHAs completos),
-//          arquivos[] (diff --name-only base..HEAD), arquivosPorCommit { sha: [arquivos] } }
+//          arquivos[] (diff --name-only base..HEAD), arquivosPorCommit { sha: [arquivos] },
+//          contagem { commits, arquivos, pendencias } (o workflow confere contra as listas) }
 import { execFileSync } from 'node:child_process'
 
 const git = (...a) => execFileSync('git', ['-c', 'core.quotepath=false', ...a], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
@@ -18,6 +19,7 @@ if (!base) {
 const intervalo = `${git('rev-parse', '--verify', `${base}^{commit}`).trim()}..HEAD`
 const pendencias = linhas(git('status', '--porcelain'))
 const commits = linhas(git('rev-list', '--reverse', intervalo))
+const arquivos = linhas(git('diff', '--name-only', intervalo))
 const arquivosPorCommit = Object.fromEntries(commits.map(sha =>
   [sha, linhas(git('diff-tree', '--no-commit-id', '--name-only', '-r', '--root', '-m', '--first-parent', sha))]))
 console.log(JSON.stringify({
@@ -27,6 +29,7 @@ console.log(JSON.stringify({
   limpo: pendencias.length === 0,
   pendencias,
   commits,
-  arquivos: linhas(git('diff', '--name-only', intervalo)),
+  arquivos,
   arquivosPorCommit,
+  contagem: { commits: commits.length, arquivos: arquivos.length, pendencias: pendencias.length },
 }))

@@ -137,6 +137,7 @@ test('instala o git-estado.mjs, que imprime o JSON que a conferência interpreta
   assert.deepEqual(e.commits, [head])
   assert.deepEqual(e.arquivos, ['pasta/b.txt'])
   assert.deepEqual(e.arquivosPorCommit, { [head]: ['pasta/b.txt'] })
+  assert.deepEqual(e.contagem, { commits: 1, arquivos: 1, pendencias: e.pendencias.length })
   assert.deepEqual(estado('HEAD').commits, [])
   assert.equal(instalar(raiz, { verificar: true }).atualizado, true)
   writeFileSync(join(raiz, '.claude', 'missao', 'git-estado.mjs'), 'manual\n')

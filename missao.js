@@ -172,6 +172,9 @@ const RESULTADO_COMMIT = {
 
 // Script instalado no projeto pelo instalar.mjs (fonte: git-estado.mjs no claude-missao).
 const GIT_ESTADO = '.claude/missao/git-estado.mjs'
+// Última saída inválida do script (ex.: erro do git), para a parada mostrar a causa real.
+let erroGit = null
+const causaGit = () => (erroGit ? `; última saída de ${GIT_ESTADO}: ${erroGit}` : '')
 // O agente de conferência só devolve a saída literal do script de estado do git; quem a interpreta é o workflow.
 const SAIDA = { type: 'object', properties: { saida: { type: 'string' } }, required: ['saida'] }
 
@@ -344,14 +347,14 @@ const SPEC_NO_PROMPT = () => `SPEC (texto, ou caminho de arquivo no repositório
 // agent() devolve null quando o modelo/API cai; nas Missions da Factory quase toda falha de worker foi assim.
 // antesDeRetentar confirma que repetir é seguro; se não for, devolve { semRetentativa: estado }.
 // Pular um agente manualmente também produz null: para interromper de fato, rode com maxRetentativasInfra 0.
-async function comRetentativa(rotulo, chamar, antesDeRetentar) {
+async function comRetentativa(rotulo, chamar, antesDeRetentar, max = MAX_RETENTATIVAS_INFRA) {
   let r = await chamar()
-  for (let t = 1; !r && t <= MAX_RETENTATIVAS_INFRA; t++) {
+  for (let t = 1; !r && t <= max; t++) {
     if (antesDeRetentar) {
       const estado = await antesDeRetentar()
       if (!estado.ok) return { semRetentativa: estado }
     }
-    log(`${rotulo}: agente não retornou (queda ou pulo manual), tentativa ${t + 1} de ${MAX_RETENTATIVAS_INFRA + 1}`)
+    log(`${rotulo}: agente não retornou (queda ou pulo manual), tentativa ${t + 1} de ${max + 1}`)
     r = await chamar()
   }
   return r
@@ -364,7 +367,7 @@ if (!preparo || !arvoreLimpa(preparo) || !preparo.branch) {
     parouEm: 'preparo',
     motivo: preparo
       ? 'árvore com mudanças pendentes ou HEAD destacado; commits atômicos exigem partir de branch limpa'
-      : 'agente de preparo não retornou',
+      : `não foi possível ler o git no preparo${causaGit()}`,
     pendencias: preparo?.pendencias ?? [],
   }
 }
@@ -641,7 +644,7 @@ const comoAceitar = headReal => `Para aceitá-lo, ${aceitar(headReal)}; para rec
 // revisado; sem ajuste, a retomada recusa.
 async function conferirCommit(f, commit, antes, arquivos, fase) {
   const c = await lerGit(antes, fase)
-  if (!c) return { motivo: `a conferência logo depois do commit de "${f.titulo}" não retornou; o commit declarado, ${commit}, entrou em retomar sem ser conferido` }
+  if (!c) return { motivo: `a conferência logo depois do commit de "${f.titulo}" não retornou; o commit declarado, ${commit}, entrou em retomar sem ser conferido${causaGit()}` }
   if (c.branch !== preparo.branch) return { motivo: `branch mudou para "${c.branch}" logo depois do commit de "${f.titulo}"` }
   if (!c.commits.some(s => mesmoSha(s, commit))) {
     return { naoAdotar: true, motivo: `o agente de commit declarou ${commit}, mas ${antes}..HEAD tem ` +
@@ -791,9 +794,15 @@ function estadoDoGit(saida) {
   }
   const lista = v => Array.isArray(v) && v.every(x => typeof x === 'string')
   const valido = c && typeof c === 'object' && ['head', 'branch', 'raiz'].every(k => typeof c[k] === 'string') &&
-    typeof c.limpo === 'boolean' && lista(c.pendencias) && lista(c.commits) && lista(c.arquivos)
+    typeof c.limpo === 'boolean' && lista(c.pendencias) && lista(c.commits) && lista(c.arquivos) &&
+    c.arquivosPorCommit && typeof c.arquivosPorCommit === 'object' &&
+    Object.keys(c.arquivosPorCommit).length === c.commits.length && c.commits.every(s => lista(c.arquivosPorCommit[s])) &&
+    // A contagem que o script imprime denuncia lista resumida ou cortada por quem repassou a saída.
+    c.contagem?.commits === c.commits.length && c.contagem?.arquivos === c.arquivos.length &&
+    c.contagem?.pendencias === c.pendencias.length
   return valido ? c : null
 }
+// Lê ao menos duas vezes, mesmo com maxRetentativasInfra 0: saída inválida é ruído do agente, não queda.
 function lerGit(base, fase, label = 'conferência') {
   return comRetentativa(label, async () => {
     const r = await agent(
@@ -803,15 +812,18 @@ function lerGit(base, fase, label = 'conferência') {
     )
     if (!r) return null
     const c = estadoDoGit(r.saida)
-    if (!c) log(`${label}: saída de ${GIT_ESTADO} inválida (${String(r.saida).slice(0, 120)}); repetindo a leitura`)
+    if (!c) {
+      erroGit = String(r.saida).trim().slice(0, 500)
+      log(`${label}: saída de ${GIT_ESTADO} inválida (${erroGit}); repetindo a leitura`)
+    }
     return c
-  })
+  }, undefined, Math.max(MAX_RETENTATIVAS_INFRA, 1))
 }
 
 // Confere que o intervalo tem exatamente os commits declarados.
 async function conferir(base, esperados, fase = 'Scrutiny') {
   const c = await lerGit(base, fase)
-  if (!c) return { ok: false, semLeitura: true, motivo: 'conferência não retornou' }
+  if (!c) return { ok: false, semLeitura: true, motivo: `conferência não retornou${causaGit()}` }
   if (c.branch !== preparo.branch) return { ok: false, motivo: `branch mudou para "${c.branch}"` }
   const deFora = commitsDeFora(c, esperados)
   if (deFora.length) {
@@ -1101,7 +1113,7 @@ for (const [i, m] of pendentes.entries()) {
           ? `repositório mudou desde a parada (branch ${c.branch}, esperada ${retomar.branch ?? preparo.branch}; HEAD ${c.head}, esperado ${retomar.head}; ${doMilestone?.length ?? 'base fora da missão, nenhum'} commits em ` +
             `${base}..HEAD, esperados ${esperado.length}). Desfaça as mudanças ou, se forem da missão, atualize ` +
             'retomar.head, retomar.commits e retomar.concluidas antes de retomar'
-          : 'não foi possível ler o repositório para retomar',
+          : `não foi possível ler o repositório para retomar${causaGit()}`,
       }, jaConcluidas), retomar }
     }
     // Arquivos que a missão já commitou, sem os dos commits de fora aceitos: commit de fora que tocar um deles para.

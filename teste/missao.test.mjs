@@ -964,3 +964,18 @@ describe('revisão: estado que atravessa a retomada', () => {
     assert.match(p2.resultado.motivo, /confirmou de novo bug já corrigido/)
   })
 })
+
+describe('revisão: leitura do git', () => {
+  test('lista resumida ou sem arquivos por commit é leitura inválida e se repete', async () => {
+    const r = await rodar(plano(), { conferenciaResumida: 1, conferenciaSemPorCommit: 1 })
+    assert.equal(r.resultado.concluido, true)
+    assert.ok(r.logs.filter(l => /saída de \.claude\/missao\/git-estado\.mjs inválida/.test(l)).length >= 2)
+  })
+
+  test('com maxRetentativasInfra 0 a leitura do git ainda se repete, e a parada mostra o erro do script', async () => {
+    const r = await rodar(plano({ maxRetentativasInfra: 0 }), { conferenciaErro: 'fatal: bad revision HEAD^{commit}' })
+    assert.equal(r.resultado.parouEm, 'preparo')
+    assert.equal(r.contar('preparo'), 2)
+    assert.match(r.resultado.motivo, /não foi possível ler o git no preparo; última saída de .*: fatal: bad revision/)
+  })
+})
