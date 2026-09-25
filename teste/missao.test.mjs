@@ -85,6 +85,7 @@ describe('conferência logo depois do commit', () => {
     assert.equal(p1.resultado.parouEm, 'M1')
     assert.match(p1.resultado.motivo, /commit de fora da missão logo depois da feature "F2": fora0001\./)
     assert.match(p1.resultado.motivo, /git rev-list --reverse <retomar\.base>\.\.HEAD/)
+    assert.match(p1.resultado.motivo, /e os SHAs de fora também em retomar\.deFora/)
     assert.equal(p1.contar('revisão: M1'), 0)
     const retomar = p1.resultado.retomar
     assert.deepEqual(retomar.concluidas, ['F1', 'F2'])

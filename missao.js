@@ -346,7 +346,9 @@ const SPEC_NO_PROMPT = () => `SPEC (texto, ou caminho de arquivo no repositório
 
 // agent() devolve null quando o modelo/API cai; nas Missions da Factory quase toda falha de worker foi assim.
 // antesDeRetentar confirma que repetir é seguro; se não for, devolve { semRetentativa: estado }.
-// Pular um agente manualmente também produz null: para interromper de fato, rode com maxRetentativasInfra 0.
+// Pular um agente manualmente também produz null: para interromper de fato, rode com maxRetentativasInfra 0. Exceção:
+// a leitura do git (lerGit) sempre repete ao menos uma vez, porque saída inválida é ruído do agente, não queda.
+// max: teto de retentativas desta chamada (padrão maxRetentativasInfra).
 async function comRetentativa(rotulo, chamar, antesDeRetentar, max = MAX_RETENTATIVAS_INFRA) {
   let r = await chamar()
   for (let t = 1; !r && t <= max; t++) {
@@ -637,7 +639,9 @@ async function julgarDeFora(c, deFora, fase, emCurso = []) {
 // A missão não decide pelo usuário se fica um commit que ela não revisou: diz como aceitá-lo na retomada.
 const aceitar = headReal => 'ponha em retomar.commits a saída de `git rev-list --reverse <retomar.base>..HEAD` e em ' +
   `retomar.head o HEAD real, ${headReal}`
-const comoAceitar = headReal => `Para aceitá-lo, ${aceitar(headReal)}; para recusá-lo, tire-o do histórico e ajuste retomar ao git resultante`
+// Commit de fora aceito à mão vai também em retomar.deFora: sem isso, a retomada o contaria como da missão.
+const aceitarDeFora = headReal => `${aceitar(headReal)}, e os SHAs de fora também em retomar.deFora, para não contarem como da missão`
+const comoAceitar = headReal => `Para aceitá-lo, ${aceitarDeFora(headReal)}; para recusá-lo, tire-o do histórico e ajuste retomar ao git resultante`
 
 // Logo depois do commit de cada feature: `antes..HEAD` tem de ser exatamente o commit declarado, com arquivos da lista
 // revisada e árvore limpa. naoAdotar: o commit não entra no `retomar`, porque não está no git ou tem arquivo não
@@ -704,7 +708,7 @@ async function implementar(features, fase) {
       return falhou(e.semLeitura
         ? 'agente caiu e não foi possível ler o repositório para decidir se era seguro repetir'
         : `agente caiu e o histórico mudou (${e.motivo}), por commit dele ou de fora da missão. Desfaça isso para ` +
-          `repetir a feature. Se for commit de fora e quiser aceitá-lo, ${aceitar(e.head)}, descartando o diff parcial ` +
+          `repetir a feature. Se for commit de fora e quiser aceitá-lo, ${aceitarDeFora(e.head)}, descartando o diff parcial ` +
           'da feature, se houver')
     }
     if (!r) return falhou(`agente não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas.${sujo}`)

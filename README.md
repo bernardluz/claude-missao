@@ -71,10 +71,10 @@ cortes explícitos e critérios de aceite verificáveis.
   eles afetam algo de que a missão depende (build, dependências, migrations do mesmo módulo,
   contrato usado). Se não afetam, entram nos commits esperados e a missão segue, com registro no log.
   Se afetam, a missão para com o SHA no motivo. O commit da feature já entra no `retomar`. Para aceitar
-  o commit de fora, ponha em `retomar.commits` a saída de `git rev-list --reverse <retomar.base>..HEAD`
-  e em `retomar.head` o HEAD real. Para recusá-lo, tire-o do histórico e ajuste o `retomar`. Sem ajuste,
-  a retomada recusa. O mesmo vale para um commit da feature com arquivo que a revisão não viu: ele
-  fica fora do `retomar` até você decidir.
+  o commit de fora, ponha seus SHAs em `retomar.deFora` e em `retomar.commits` a saída de
+  `git rev-list --reverse <retomar.base>..HEAD` e em `retomar.head` o HEAD real. Para recusá-lo, tire-o do
+  histórico e ajuste o `retomar`. Sem ajuste, a retomada recusa. O mesmo vale para um commit da feature com
+  arquivo que a revisão não viu, sem o `deFora`, porque ele é da missão: fica fora do `retomar` até você decidir.
 - **Saída em arquivo, nunca em pipe.** Os agentes mandam a saída de build, testes, gates e
   `git commit` para arquivo temporário e leem o arquivo depois. Um daemon deixado vivo pelo gate, como o
   do compilador Kotlin, herda o pipe e trava o comando.
