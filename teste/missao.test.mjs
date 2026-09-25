@@ -23,7 +23,7 @@ describe('fluxo principal', () => {
     const r = await rodar(plano())
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.commits, 3)
-    assert.equal(r.agentes, 3 + 4 * 3 + 4 * 2 + 3)
+    assert.equal(r.agentes, 3 + 4 * 3 + 7 * 2 + 3)
     assert.equal(r.contar('suíte completa'), 1)
     assert.match(r.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${r.agentes} agentes`))
     assert.equal(r.contar('revisão: F'), 3)
@@ -727,5 +727,99 @@ describe('spec, planejamento e pré-voo', () => {
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
     assert.equal(p2.resultado.concluido, true)
     assert.equal(p2.contar('pré-voo'), 1)
+  })
+})
+
+describe('prova de contrato, caça bug e user testing por milestone', () => {
+  const comEtapas = extra => ({
+    ...extra,
+    milestones: [
+      { titulo: 'M1', criterio: 'c', caca: ['autorização', 'persistência'], userTesting: 'abre a tela e salva', features: [{ titulo: 'F1', spec: 's' }] },
+      { titulo: 'M2', criterio: 'c', features: [{ titulo: 'F2', spec: 's' }] },
+    ],
+  })
+
+  test('ordem por milestone: contrato, implementar, scrutiny, caça por área, user testing', async () => {
+    const r = await rodar(comEtapas())
+    assert.equal(r.resultado.concluido, true)
+    const ordem = r.chamadas.map(c => c.label)
+    const pos = l => ordem.indexOf(l)
+    assert.ok(pos('contrato: M1') < pos('F1'))
+    assert.ok(pos('revisão: M1') < pos('caça: autorização (M1, rodada 1)'))
+    assert.ok(pos('caça: persistência (M1, rodada 1)') < pos('user testing: M1'))
+    assert.ok(pos('user testing: M1') < pos('contrato: M2'))
+    assert.equal(r.contar('áreas de caça: M1'), 0)
+    assert.equal(r.chamadas.find(c => c.label === 'áreas de caça: M2').model, 'haiku')
+    assert.equal(r.contar('caça: geral (M2, rodada 1)'), 1)
+    assert.equal(r.contar('user testing: M2'), 0)
+    assert.match(r.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${r.agentes} agentes`))
+    assert.equal(r.chamadas.find(c => c.label === 'revisão: M1').phase, 'Scrutiny')
+  })
+
+  test('prova de contrato com premissa falsa para antes de implementar, com todas as perguntas juntas', async () => {
+    const contratoFalso = { M1: [
+      { premissa: 'GET /contas devolve id', confere: false, pergunta: 'usar idConta?' },
+      { premissa: 'campo saldo', confere: true },
+      { premissa: '404 sem acesso', confere: false },
+    ] }
+    const r = await rodar(comEtapas(), { contratoFalso })
+    assert.equal(r.resultado.parouEm, 'M1')
+    assert.match(r.resultado.motivo, /prova de contrato: 2 premissa\(s\)/)
+    assert.deepEqual(r.resultado.perguntas, ['usar idConta?', 'confirmar: 404 sem acesso'])
+    assert.equal(r.contar('F1'), 0)
+    assert.equal(r.resultado.retomar.aPartirDe, 'M1')
+  })
+
+  test('achado confirmado pelos dois verificadores vira correção, passa pelo scrutiny e a caça volta; rodada vazia encerra', async () => {
+    const r = await rodar(comEtapas(), { caca: { M1: [1, 0] } })
+    assert.equal(r.resultado.concluido, true)
+    // 2 áreas × 1 achado = 2 achados, 2 verificadores cada
+    assert.equal(r.contar('verificação '), 4)
+    assert.equal(r.contar('commit: correção 1.1 (M1)'), 1)
+    assert.equal(r.contar('commit: correção 1.2 (M1)'), 1)
+    const ordem = r.chamadas.map(c => c.label)
+    assert.ok(ordem.indexOf('commit: correção 1.2 (M1)') < ordem.lastIndexOf('revisão: M1'))
+    assert.ok(ordem.lastIndexOf('revisão: M1') < ordem.indexOf('caça: autorização (M1, rodada 2)'))
+    assert.equal(r.contar('caça: autorização (M1, rodada 3)'), 0)
+    assert.match(r.prompt('caça: autorização (M1, rodada 2)'), /Já corrigidos nesta missão .*: x\/a\.js bug 1\.1/)
+    assert.match(r.prompt('verificação 1: achado 1 (M1, rodada 1)'), /Tente refutar este possível bug .*: x\/a\.js bug 1\.1/)
+  })
+
+  test('achado refutado por um verificador não vira correção', async () => {
+    const r = await rodar(comEtapas(), { caca: { M1: [1] }, refuta: true })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('correção'), 0)
+    assert.equal(r.contar('caça: autorização (M1, rodada 2)'), 0)
+  })
+
+  test('bug confirmado de novo depois de corrigido para a missão pedindo decisão', async () => {
+    const r = await rodar(comEtapas(), { caca: { M1: [1, 1] }, cacaRepete: { M1: 2 } })
+    assert.equal(r.resultado.parouEm, 'M1')
+    assert.match(r.resultado.motivo, /confirmou de novo bug já corrigido/)
+    assert.equal(r.contar('correção 2.'), 0)
+  })
+
+  test('caça respeita o teto de rodadas e segue', async () => {
+    const r = await rodar(comEtapas({ maxRodadasCaca: 2 }), { caca: { M1: [1, 1, 1] } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('caça: autorização (M1, rodada 3)'), 0)
+    assert.ok(r.logs.some(l => /M1: teto de 2 rodadas de caça bug/.test(l)))
+  })
+
+  test('user testing que falha vira correção, volta ao scrutiny e testa de novo', async () => {
+    const r = await rodar(comEtapas(), { userTesting: { M1: [1, 0] } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('user testing: M1'), 2)
+    const ordem = r.chamadas.map(c => c.label)
+    const correcao = ordem.indexOf('commit: correção 1.1 (M1)')
+    assert.ok(correcao > ordem.indexOf('user testing: M1'))
+    assert.ok(ordem.indexOf('revisão: M1', correcao) < ordem.lastIndexOf('user testing: M1'))
+    assert.match(r.prompt('user testing: M1'), /abre a tela e salva/)
+    assert.match(r.prompt('user testing: M1'), /nunca aponte para produção/)
+  })
+
+  test('user testing sem progresso para', async () => {
+    const r = await rodar(comEtapas(), { userTesting: { M1: [1, 1] } })
+    assert.match(r.resultado.motivo, /sem progresso na rodada 1: 1 problemas antes, 1 depois/)
   })
 })

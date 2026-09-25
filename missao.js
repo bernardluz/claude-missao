@@ -9,8 +9,11 @@ export const meta = {
     { title: 'Pré-voo', detail: 'confere se o ambiente roda testes e suíte antes de qualquer commit' },
     { title: 'Contexto', detail: 'contexto do plano por área, gerado uma vez e reaproveitado na retomada' },
     { title: 'Implementar', detail: 'por feature, em série: implementa, revisão independente, commit' },
-    { title: 'Validar', detail: 'confere commits, revisão + testes sobre o milestone' },
+    { title: 'Contrato', detail: 'por milestone: confere no código do dono as premissas das features' },
+    { title: 'Scrutiny', detail: 'confere commits; testes, lint, typecheck e revisão contra o critério do milestone' },
     { title: 'Corrigir', detail: 'um item por problema apontado, com revisão e commit próprios' },
+    { title: 'Caça bug', detail: 'caçador por área; cada achado com 2 verificadores; confirmado vira correção' },
+    { title: 'User testing', detail: 'só com jornada no plano: percorre como usuário na stack local' },
     { title: 'Suíte final', detail: 'suíte completa do projeto ao fim; falhas viram correções' },
   ],
 }
@@ -104,6 +107,7 @@ const MAX_PROBLEMAS_POR_RODADA = args?.maxProblemasPorRodada ?? 10
 const MAX_RODADAS_REVISAO = args?.maxRodadasRevisao ?? 3
 const MAX_FEATURES_POR_MILESTONE = args?.maxFeaturesPorMilestone ?? 8
 const MAX_RETENTATIVAS_INFRA = args?.maxRetentativasInfra ?? 2
+const MAX_RODADAS_CACA = args?.maxRodadasCaca ?? 3
 
 const GIT_PROIBIDO =
   'Trabalhe só no HEAD atual da branch. Proibido: ' +
@@ -254,12 +258,12 @@ const PRE_VOO = {
 // args.spec, a missão verifica a simplicidade da SPEC e gera o plano antes de começar.
 const SPEC = typeof args?.spec === 'string' && args.spec.trim() ? args.spec.trim() : null
 const planoDado = args?.milestones ?? args?.plano?.milestones ?? args?.retomar?.plano?.milestones ?? null
-const limitesOk = [MAX_RODADAS_CORRECAO, MAX_PROBLEMAS_POR_RODADA, MAX_RODADAS_REVISAO, MAX_FEATURES_POR_MILESTONE].every(n => Number.isInteger(n) && n >= 1) &&
+const limitesOk = [MAX_RODADAS_CORRECAO, MAX_PROBLEMAS_POR_RODADA, MAX_RODADAS_REVISAO, MAX_FEATURES_POR_MILESTONE, MAX_RODADAS_CACA].every(n => Number.isInteger(n) && n >= 1) &&
   Number.isInteger(MAX_RETENTATIVAS_INFRA) && MAX_RETENTATIVAS_INFRA >= 0
 if (!args || !limitesOk || (!planoDado && !SPEC)) {
   throw new Error('args inválido: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } ou ' +
     '{ spec }, com maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, ' +
-    'maxRetentativasInfra?, retomar?; limites inteiros ≥ 1 e retentativas ≥ 0')
+    'maxRetentativasInfra?, maxRodadasCaca?, retomar?; limites inteiros ≥ 1 e retentativas ≥ 0')
 }
 
 // A suíte completa roda uma vez ao fim, como uma etapa sem features: falha vira correção no mesmo loop.
@@ -413,10 +417,12 @@ const planoTexto = pendentes.filter(m => !m.suite).map(m =>
 ).join('\n\n')
 
 const totalFeatures = pendentes.reduce((n, m) => n + m.features.length, 0)
-const milestonesPendentes = pendentes.filter(m => !m.suite).length
 // preparo, pré-voo e contexto (se não veio do retomar); por feature: worker, revisão, commit e conferência; por
-// milestone: 2 conferências + 2 validadores; suíte final: 2 conferências + 1 validador
-const estimativa = 2 + (retomar?.contexto ? 0 : 1) + 4 * totalFeatures + 4 * milestonesPendentes + 3
+// milestone: prova de contrato, 2 conferências, 2 validadores, caça (um caçador por área, mais o agente que deriva as
+// áreas se o plano não as traz) e user testing se houver jornada; suíte final: 2 conferências + 1 validador
+const porMilestone = m => 5 + (m.caca ? m.caca.length : 2) + (m.userTesting ? 1 : 0)
+const estimativa = 2 + (retomar?.contexto ? 0 : 1) + 4 * totalFeatures +
+  pendentes.filter(m => !m.suite).reduce((n, m) => n + porMilestone(m), 0) + 3
 log(`Estimativa mínima: ${estimativa} agentes a partir daqui (sem contar correções e retentativas)`)
 
 const relatorio = []
@@ -784,7 +790,7 @@ function lerGit(base, fase, label = 'conferência') {
 }
 
 // Confere que o intervalo tem exatamente os commits declarados.
-async function conferir(base, esperados, fase = 'Validar') {
+async function conferir(base, esperados, fase = 'Scrutiny') {
   const c = await lerGit(base, fase)
   if (!c) return { ok: false, semLeitura: true, motivo: 'conferência não retornou' }
   if (c.branch !== preparo.branch) return { ok: false, motivo: `branch mudou para "${c.branch}"` }
@@ -851,13 +857,13 @@ async function validar(m, base, arquivos, anteriores) {
       `Revise os commits ${intervalo} do milestone "${m.titulo}" (critério: ${m.criterio}). ` +
       'Aponte só problemas bloqueantes de correção, segurança, contrato ou atomicidade dos commits.' + memoria +
       '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
-      { label: `revisão: ${m.titulo}`, phase: 'Validar', agentType: revisorPara(arquivos.map(normalizar)), schema: VALIDACAO },
+      { label: `revisão: ${m.titulo}`, phase: 'Scrutiny', agentType: revisorPara(arquivos.map(normalizar)), schema: VALIDACAO },
     )),
     () => comRetentativa(`testes: ${m.titulo}`, () => trabalhar(montar('scrutiny',
       `Rode, no HEAD atual, os testes focados que cobrem os commits ${intervalo} do milestone "${m.titulo}" ` +
       `e confira o critério: ${m.criterio}. Não altere código. Reporte falhas com a saída relevante.` + memoria +
       '\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
-      { label: `testes: ${m.titulo}`, phase: 'Validar', schema: VALIDACAO },
+      { label: `testes: ${m.titulo}`, phase: 'Scrutiny', schema: VALIDACAO },
     )),
   ])
   if (!revisao || !testes) return { erro: 'um validador não respondeu' }
@@ -865,6 +871,129 @@ async function validar(m, base, arquivos, anteriores) {
   const aprovado = revisao.aprovado && testes.aprovado
   if (!aprovado && problemas.length === 0) return { erro: 'validação reprovou sem apontar problemas' }
   return { aprovado, problemas }
+}
+
+const CONTRATO = {
+  type: 'object',
+  properties: {
+    aprendizados: APRENDIZADOS,
+    premissas: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          premissa: { type: 'string' }, evidencia: { type: 'string' }, confere: { type: 'boolean' }, pergunta: { type: 'string' },
+        },
+        required: ['premissa', 'confere'],
+      },
+    },
+  },
+  required: ['premissas'],
+}
+const ACHADOS = {
+  type: 'object',
+  properties: {
+    aprendizados: APRENDIZADOS,
+    achados: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { arquivo: { type: 'string' }, problema: { type: 'string' }, repete: { type: 'boolean' } },
+        required: ['problema'],
+      },
+    },
+  },
+  required: ['achados'],
+}
+const VEREDITO = {
+  type: 'object',
+  properties: { aprendizados: APRENDIZADOS, confirmado: { type: 'boolean' }, motivo: { type: 'string' } },
+  required: ['confirmado', 'motivo'],
+}
+const AREAS_CACA = { type: 'object', properties: { areas: { type: 'array', items: { type: 'string' } } }, required: ['areas'] }
+
+// Antes de implementar: as premissas das features sobre o que o milestone não controla, conferidas no código do dono.
+// Premissa falsa para a missão com todas as perguntas juntas.
+async function provarContrato(m, aFazer) {
+  const r = await comRetentativa(`contrato: ${m.titulo}`, () => trabalhar(montar('prova-de-contrato',
+    `Milestone "${m.titulo}" (critério: ${m.criterio}). Features a implementar:\n` +
+    aFazer.map(f => `- ${f.titulo}: ${f.spec}`).join('\n') + '\n\n' +
+    'Liste as premissas que essas features fazem sobre outros serviços, módulos ou libs (rotas, campos, ids, ' +
+    'comportamento) e confira cada uma no código do dono. Devolva cada premissa com a evidência (arquivo e linha), ' +
+    'confere=true ou false e, se ela não confere ou é ambígua, a pergunta objetiva para o usuário. Sem premissa ' +
+    'externa, devolva a lista vazia. Não escreva arquivos nem rode build: só leitura.\n' + GIT_PROIBIDO, guiasDe(m)),
+    { label: `contrato: ${m.titulo}`, phase: 'Contrato', agentType: comoAgente(CONFIG.leitor), schema: CONTRATO },
+  ))
+  if (!r) return { motivo: 'o agente da prova de contrato não respondeu' }
+  const falsas = r.premissas.filter(p => !p.confere)
+  if (!falsas.length) return null
+  return {
+    motivo: `prova de contrato: ${falsas.length} premissa(s) do milestone não conferem no código do dono; responda as ` +
+      'perguntas, ajuste o plano e retome (nada deste milestone foi implementado)',
+    perguntas: falsas.map(p => p.pergunta || `confirmar: ${p.premissa}`),
+    premissas: falsas,
+  }
+}
+
+// Áreas de caça-bug quando o plano não traz m.caca: um agente barato as deriva dos arquivos tocados.
+async function areasDeCaca(m, arquivos) {
+  const r = await comRetentativa(`áreas de caça: ${m.titulo}`, () => agent(
+    `Arquivos tocados pelo milestone "${m.titulo}": ${arquivos.join(', ') || 'nenhum'}. Agrupe-os em 1 a 4 áreas de ` +
+    'risco para caçar bugs (ex.: autorização, persistência, contrato HTTP, tela). Devolva só os nomes das áreas, ' +
+    'cada um com os caminhos que cobre entre parênteses. Não rode nada.',
+    { label: `áreas de caça: ${m.titulo}`, phase: 'Caça bug', schema: AREAS_CACA, model: CONFIG.modeloConferencia, effort: 'low' },
+  ))
+  const areas = (r?.areas ?? []).filter(a => typeof a === 'string' && a.trim()).slice(0, 4)
+  return areas.length ? areas : ['o diff inteiro']
+}
+
+const textoDoAchado = a => `${a.arquivo ?? ''} ${a.problema}`.trim()
+// Um caçador por área sobre o diff; cada achado passa por 2 verificadores que tentam refutá-lo, e só fica o que os dois
+// confirmam. Devolve { confirmados } ou { erro }.
+async function cacar(rotulo, areas, intervalo, foco, corrigidos) {
+  const jaCorrigidos = corrigidos.length
+    ? `\nJá corrigidos nesta missão (achou um deles de novo? marque repete=true): ${corrigidos.join(' | ')}`
+    : ''
+  const porArea = await parallel(areas.map(area => () => comRetentativa(`caça: ${area} (${rotulo})`, () => trabalhar(montar('caca-bug',
+    `Cace bugs reais no diff \`git diff ${intervalo}\`, na área: ${area}. ${foco}${jaCorrigidos}\n` +
+    'Devolva cada achado com o arquivo e o problema demonstrável (passo a passo ou teste que quebra). Sem achado, ' +
+    `lista vazia. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`),
+    { label: `caça: ${area} (${rotulo})`, phase: 'Caça bug', schema: ACHADOS },
+  ))))
+  if (porArea.some(r => !r)) return { erro: `um caçador de bugs (${rotulo}) não respondeu` }
+  const achados = porArea.flatMap(r => r.achados)
+  const vereditos = await parallel(achados.map((a, i) => () => parallel([1, 2].map(n => () =>
+    comRetentativa(`verificação ${n}: achado ${i + 1} (${rotulo})`, () => trabalhar(montar('caca-bug',
+      `Tente refutar este possível bug em \`git diff ${intervalo}\`: ${textoDoAchado(a)}\n` +
+      'Confirme (confirmado=true) só se reproduzir ou se o código não deixar dúvida; na dúvida, confirmado=false. ' +
+      `Explique em motivo. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`),
+      { label: `verificação ${n}: achado ${i + 1} (${rotulo})`, phase: 'Caça bug', schema: VEREDITO },
+    ))))))
+  const confirmados = achados.filter((_, i) => vereditos[i]?.every(v => v?.confirmado === true))
+  if (achados.length) log(`caça (${rotulo}): ${achados.length} achado(s), ${confirmados.length} confirmado(s) pelos dois verificadores`)
+  return { confirmados }
+}
+
+// Jornada do milestone como usuário, na stack local.
+async function testarComoUsuario(m, anteriores) {
+  const memoria = anteriores.length
+    ? `\nNa rodada anterior falharam: ${anteriores.map(p => p.problema).join(' | ')}. Confirme se foram resolvidos.`
+    : ''
+  const r = await comRetentativa(`user testing: ${m.titulo}`, () => trabalhar(montar('user-testing',
+    `Percorra como usuário a jornada do milestone "${m.titulo}": ${m.userTesting}\n` +
+    'Use só a stack local: pode subir os serviços locais com os comandos do projeto e usar navegador; nunca aponte ' +
+    'para produção nem use credencial real. Não altere código. Ao terminar, derrube o que subiu e deixe a árvore como ' +
+    'estava. Aprove só se a jornada inteira funcionar; cada falha vira um problema com o passo e a evidência. Se não ' +
+    `der para subir a stack (ambiente), marque ambiente=true.${memoria}\n${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`, guiasDe(m)),
+    { label: `user testing: ${m.titulo}`, phase: 'User testing', schema: VALIDACAO },
+  ))
+  if (!r) return { erro: 'o agente de user testing não respondeu' }
+  if (!r.aprovado && r.problemas.length === 0) return { erro: 'user testing reprovou sem apontar problemas' }
+  const deAmbiente = r.problemas.filter(p => p.ambiente)
+  if (!r.aprovado && deAmbiente.length) {
+    return { erro: `o user testing não roda por causa do ambiente: ${deAmbiente.map(p => p.problema).join(' | ')}. Ajuste o ambiente e retome` }
+  }
+  return { aprovado: r.aprovado, problemas: r.problemas }
 }
 
 // Correção e validação podem tocar qualquer parte do milestone: recebem todas as áreas dele. Na suíte final a falha
@@ -914,29 +1043,24 @@ for (const [i, m] of pendentes.entries()) {
   const aFazer = m.features.filter(f => !jaConcluidas.includes(f.titulo))
   arquivosDoMilestone = new Set()
   log(m.suite ? 'Suíte completa do projeto' : `Milestone: ${m.titulo} (${aFazer.length} de ${m.features.length} features a implementar)`)
-  const pararAqui = extra => parar(m, base, feitas, commits, extra, jaConcluidas)
+  const pararAqui = extra => {
+    if (extra.motivo) log(`Parando em "${m.titulo}": ${extra.motivo}`)
+    return parar(m, base, feitas, commits, extra, jaConcluidas)
+  }
   const features = aFazer.map(f => ({ ...f, guias: guiaPorFeature.has(f.titulo) ? [guiaPorFeature.get(f.titulo)] : [] }))
   const guiasDoMilestone = guiasDe(m)
-
-  const impl = await implementar(features, 'Implementar')
-  feitas.push(...impl.resultados)
-  commits.push(...impl.commits)
-  if (impl.falhou) return pararAqui(impl.falhou)
-
-  let conf = await conferir(base, commits)
-  if (!conf.ok) return pararAqui({ motivo: conf.motivo })
-  let v = await validar(m, base, conf.arquivos, [])
-  if (v.erro) return pararAqui({ motivo: v.erro })
-
+  let conf = null
+  // Rodadas de correção do milestone, contadas em sequência por scrutiny, caça bug e user testing.
   let rodada = 0
-  let semProgresso = null
-  while (!v.aprovado && rodada < MAX_RODADAS_CORRECAO) {
+
+  // Uma rodada de correção: cada problema vira uma feature com revisão e commit próprios, e o git é conferido.
+  async function rodadaDeCorrecao(problemas) {
     rodada++
-    if (v.problemas.length > MAX_PROBLEMAS_POR_RODADA) {
-      return pararAqui({ motivo: `${v.problemas.length} problemas numa rodada (limite ${MAX_PROBLEMAS_POR_RODADA}); revise o plano`, problemas: v.problemas })
+    if (problemas.length > MAX_PROBLEMAS_POR_RODADA) {
+      return { motivo: `${problemas.length} problemas numa rodada (limite ${MAX_PROBLEMAS_POR_RODADA}); revise o plano`, problemas }
     }
-    log(`${m.titulo}: ${v.problemas.length} problemas → rodada de correção ${rodada}`)
-    const todos = v.problemas.map(p => `${p.arquivo ?? ''} ${p.problema}`.trim())
+    log(`${m.titulo}: ${problemas.length} problemas → rodada de correção ${rodada}`)
+    const todos = problemas.map(textoDoAchado)
     const correcoes = todos.map((p, i) => ({
       titulo: `correção ${rodada}.${i + 1} (${m.titulo})`,
       spec: `Corrija: ${p}\n${m.suite ? 'Falha da suíte completa ao fim da missão' : `Milestone "${m.titulo}", critério: ${m.criterio}, commits ${base}..${head}`}.\n` +
@@ -948,26 +1072,76 @@ for (const [i, m] of pendentes.entries()) {
     const fix = await implementar(correcoes, 'Corrigir')
     feitas.push(...fix.resultados)
     commits.push(...fix.commits)
-    if (fix.falhou) return pararAqui(fix.falhou)
-
+    if (fix.falhou) return fix.falhou
     conf = await conferir(base, commits)
-    if (!conf.ok) return pararAqui({ motivo: conf.motivo })
-    const anterior = v.problemas
-    v = await validar(m, base, conf.arquivos, anterior)
-    if (v.erro) return pararAqui({ motivo: v.erro })
-    if (!v.aprovado && v.problemas.length >= anterior.length) {
-      semProgresso = { antes: anterior.length, depois: v.problemas.length }
-      break
+    return conf.ok ? null : { motivo: conf.motivo }
+  }
+
+  // Avalia e corrige em loop enquanto os problemas diminuem; o teto só evita loop infinito. depois: o que roda após
+  // cada correção, antes de reavaliar. Devolve null quando aprova, ou o motivo da parada.
+  async function ateFechar(avaliar, depois) {
+    let v = await avaliar([])
+    for (let n = 1; ; n++) {
+      if (v.erro) return { motivo: v.erro }
+      if (v.aprovado) return null
+      if (n > MAX_RODADAS_CORRECAO) return { motivo: `não fechou após ${MAX_RODADAS_CORRECAO} rodadas`, problemas: v.problemas }
+      const e = (await rodadaDeCorrecao(v.problemas)) ?? (depois ? await depois() : null)
+      if (e) return e
+      const anterior = v.problemas
+      v = await avaliar(anterior)
+      if (!v.erro && !v.aprovado && v.problemas.length >= anterior.length) {
+        return { motivo: `sem progresso na rodada ${rodada}: ${anterior.length} problemas antes, ${v.problemas.length} depois`, problemas: v.problemas }
+      }
+    }
+  }
+  // Scrutiny validator (a antiga validação): testes, lint, typecheck e revisão contra o critério, com correções.
+  const scrutiny = () => ateFechar(anteriores => validar(m, base, conf.arquivos, anteriores))
+
+  if (!m.suite && aFazer.length) {
+    const e = await provarContrato(m, aFazer)
+    if (e) return pararAqui(e)
+  }
+
+  const impl = await implementar(features, 'Implementar')
+  feitas.push(...impl.resultados)
+  commits.push(...impl.commits)
+  if (impl.falhou) return pararAqui(impl.falhou)
+
+  conf = await conferir(base, commits)
+  if (!conf.ok) return pararAqui({ motivo: conf.motivo })
+  let e = await scrutiny()
+  if (e) return pararAqui(e)
+
+  // Caça bug depois que o scrutiny passa: bug confirmado vira correção, volta ao scrutiny e a caça recomeça. Para na
+  // rodada sem bug confirmado ou no teto; bug confirmado de novo depois de corrigido para a missão.
+  if (!m.suite) {
+    const areas = m.caca ?? await areasDeCaca(m, conf.arquivos)
+    const corrigidos = []
+    for (let r = 1; ; r++) {
+      const c = await cacar(`${m.titulo}, rodada ${r}`, areas, `${base}..${head}`,
+        `Milestone "${m.titulo}", critério: ${m.criterio}.`, corrigidos)
+      if (c.erro) return pararAqui({ motivo: c.erro })
+      if (!c.confirmados.length) break
+      const repetidos = c.confirmados.filter(a => a.repete)
+      if (repetidos.length) {
+        return pararAqui({ motivo: 'a caça confirmou de novo bug já corrigido nesta missão; decida à mão antes de retomar', problemas: repetidos })
+      }
+      corrigidos.push(...c.confirmados.map(textoDoAchado))
+      e = (await rodadaDeCorrecao(c.confirmados)) ?? await scrutiny()
+      if (e) return pararAqui(e)
+      if (r >= MAX_RODADAS_CACA) {
+        log(`${m.titulo}: teto de ${MAX_RODADAS_CACA} rodadas de caça bug; as correções da última rodada passaram no scrutiny`)
+        break
+      }
     }
   }
 
-  if (!v.aprovado) {
-    const motivo = semProgresso
-      ? `sem progresso na rodada ${rodada}: ${semProgresso.antes} problemas antes, ${semProgresso.depois} depois`
-      : `não fechou após ${MAX_RODADAS_CORRECAO} rodadas`
-    log(`Parando em "${m.titulo}": ${motivo}`)
-    return pararAqui({ motivo, problemas: v.problemas })
+  // User testing, só com jornada no plano: falha vira correção, que passa pelo scrutiny antes de testar de novo.
+  if (m.userTesting) {
+    e = await ateFechar(anteriores => testarComoUsuario(m, anteriores), scrutiny)
+    if (e) return pararAqui(e)
   }
+
   // Os validadores rodam depois da última conferência: confirma que não sujaram a árvore nem commitaram.
   conf = await conferir(base, commits)
   if (!conf.ok) return pararAqui({ motivo: `após validação: ${conf.motivo}` })

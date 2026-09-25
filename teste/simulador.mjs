@@ -43,7 +43,13 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   perguntas, cortes  o que a verificação de simplicidade devolve (qualquer um deles faz a missão parar)
 //   planoGerado        milestones que o agente de planejamento devolve (padrão: os de plano())
 //   preVooFalta        [itens] o pré-voo acusa o que falta no ambiente
-//   foraImpacta      resposta do agente que julga commit de fora (padrão true: para como antes)
+//   contratoFalso      { [milestone]: [premissas] } premissas que a prova de contrato devolve (use confere: false)
+//   areasCaca          áreas que o agente barato deriva quando o milestone não traz caca (padrão ['geral'])
+//   caca               { [milestone]: [n achados por rodada, por caçador] }
+//   cacaRepete         { [milestone]: rodada } nessa rodada os achados repetem bug já corrigido
+//   refuta             o segundo verificador refuta todos os achados
+//   userTesting        { [milestone]: [n falhas por rodada] } resultado do user testing
+//   foraImpacta     resposta do agente que julga commit de fora (padrão true: para como antes)
 //   conferenciaInvalida vezes que o agente de conferência devolve texto em vez da saída do git-estado.mjs
 export const DUMP = 'bash.exe.stackdump'
 export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0000'], sujo: false }) {
@@ -67,6 +73,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   let invalida = o.conferenciaInvalida ?? 0
   let rodadaValidacao = 0
   let rodadaSuite = 0
+  const rodadaUT = {}
   const chamadas = []
   const logs = []
   const novoSha = () => `sha${String(estado.git.length).padStart(5, '0')}`
@@ -109,7 +116,23 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       const n = (o.suite ?? [])[rodadaSuite++] ?? 0
       return { aprovado: n === 0, problemas: problemas(n, 's') }
     }
-    if (opt.phase === 'Validar') {
+    if (l.startsWith('contrato: ')) return { premissas: o.contratoFalso?.[l.slice(10)] ?? [] }
+    if (l.startsWith('áreas de caça: ')) return { areas: o.areasCaca ?? ['geral'] }
+    const caca = l.match(/^caça: .* \((.+), rodada (\d+)\)$/)
+    if (caca) {
+      const [, m, r] = caca
+      const n = (o.caca?.[m] ?? [])[Number(r) - 1] ?? 0
+      return { achados: Array.from({ length: n }, (_, i) => ({ arquivo: 'x/a.js', problema: `bug ${r}.${i + 1}`, repete: o.cacaRepete?.[m] === Number(r) })) }
+    }
+    if (l.startsWith('verificação ')) return { confirmado: !(o.refuta && l.startsWith('verificação 2')), motivo: 'reproduzido' }
+    if (l.startsWith('user testing: ')) {
+      const m = l.slice(14)
+      const i = rodadaUT[m] ?? 0
+      rodadaUT[m] = i + 1
+      const n = (o.userTesting?.[m] ?? [])[i] ?? 0
+      return { aprovado: n === 0, problemas: problemas(n, 'u') }
+    }
+    if (opt.phase === 'Scrutiny') {
       if (l.startsWith('testes: ')) return { aprovado: true, problemas: [] }
       const n = (o.validacao ?? [])[rodadaValidacao++] ?? 0
       return { aprovado: n === 0, problemas: problemas(n, 'v') }
