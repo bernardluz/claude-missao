@@ -22,7 +22,7 @@ const MIN = 60 * 1000
 
 // Execução falsa. Cada chamada é [label, resultado]: undefined = rodando, CAIU = agente caiu.
 // `idadeMs` é quanto tempo faz desde a última escrita nos arquivos.
-function execucao(raiz, runId, chamadas, { sessao = 's1', cwd = 'C:/repo/proj', head = 'aaaaaaa1', idadeMs = 0, inicioMin = 0, plano = PLANO } = {}) {
+function execucao(raiz, runId, chamadas, { sessao = 's1', cwd = 'C:/repo/proj', head = 'aaaaaaa1', idadeMs = 0, inicioMin = 0, plano = PLANO, porScript = false } = {}) {
   const dir = join(raiz, 'projects', 'C--repo-proj', sessao, 'subagents', 'workflows', runId)
   mkdirSync(dir, { recursive: true })
   const linhas = [{ type: 'launched' }]
@@ -40,7 +40,9 @@ function execucao(raiz, runId, chamadas, { sessao = 's1', cwd = 'C:/repo/proj', 
     ].map(o => JSON.stringify(o)).join('\n') + '\n')
     if (resultado === CAIU) linhas.push({ type: 'failed', key, agentId })
     else if (resultado !== undefined) {
-      linhas.push({ type: 'result', key, agentId, result: label === 'preparo' ? { limpo: true, branch: 'develop', head, raiz: cwd } : resultado })
+      linhas.push({ type: 'result', key, agentId, result: label !== 'preparo' ? resultado : porScript
+        ? { saida: JSON.stringify({ limpo: true, branch: 'develop', head, raiz: cwd, pendencias: [], commits: [], arquivos: [] }) }
+        : { limpo: true, branch: 'develop', head, raiz: cwd } })
     }
   })
   writeFileSync(join(dir, 'journal.jsonl'), linhas.map(o => JSON.stringify(o)).join('\n') + '\n')
@@ -495,4 +497,13 @@ test('modelo e effort de cada agente vêm do registro dele', () => {
   assert.equal(c.modelo, 'claude-opus-5-5')
   assert.equal(c.effort, 'high')
   assert.equal(m.agora.effort, 'high')
+})
+
+test('preparo lido pelo git-estado.mjs: branch e base vêm do JSON da saída', () => {
+  const raiz = temp()
+  execucao(raiz, 'wf_1', [...inicio, ...f1Feita], { porScript: true, head: 'base0009' })
+  const [m] = missoes(raiz)
+  assert.equal(m.branch, 'develop')
+  assert.equal(m.base, 'base0009')
+  assert.match(m.linhaDoTempo.at(-1).resumo, /^árvore limpa em base0009/)
 })

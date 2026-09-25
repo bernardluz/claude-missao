@@ -74,7 +74,7 @@ describe('conferência logo depois do commit', () => {
     for (const [feature, antes] of [['F1', 'base0000'], ['F2', f1]]) {
       const i = ordem.indexOf(`commit: ${feature}`)
       assert.equal(ordem[i + 1], 'conferência', feature)
-      assert.match(r.chamadas[i + 1].prompt, new RegExp(`rev-list --reverse ${antes}\\.\\.HEAD`), feature)
+      assert.match(r.chamadas[i + 1].prompt, new RegExp(`node \\.claude/missao/git-estado\\.mjs ${antes}\``), feature)
     }
     assert.notEqual(f1, f2)
   })
@@ -166,6 +166,21 @@ describe('conferência logo depois do commit', () => {
     const r = await rodar(plano(), { suja: { 'commit: F1': 1 } })
     assert.match(r.resultado.motivo, /árvore com mudanças não commitadas depois do commit de "F1": M x\/a\.js/)
     assert.equal(r.contar('F2'), 0)
+  })
+
+  test('conferência lê o git pelo script, com modelo barato, e saída inválida repete a leitura', async () => {
+    const r = await rodar(plano(), { conferenciaInvalida: 1 })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.chamadas[0].label, 'preparo')
+    assert.match(r.prompt('preparo'), /node \.claude\/missao\/git-estado\.mjs HEAD`/)
+    assert.ok(r.logs.some(l => /^preparo: saída de \.claude\/missao\/git-estado\.mjs inválida/.test(l)))
+    assert.equal(r.contar('preparo'), 2)
+    assert.equal(r.chamadas.find(c => c.label === 'conferência').model, 'haiku')
+    const sempre = await rodar(plano(), { conferenciaInvalida: 99 })
+    assert.equal(sempre.resultado.parouEm, 'preparo')
+    assert.equal(sempre.contar('preparo'), 3)
+    const outroModelo = await rodarCom({ modeloConferencia: 'sonnet' }, plano())
+    assert.equal(outroModelo.chamadas.find(c => c.label === 'conferência').model, 'sonnet')
   })
 
   test('conferência que não volta ou branch trocada logo depois do commit param a missão', async () => {

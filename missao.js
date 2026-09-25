@@ -51,6 +51,8 @@ const PADRAO = {
   // Como rodar, ao fim da missão, a suíte completa do que a missão tocou e de quem depende disso (comando ou
   // instrução; {inicio} vira o commit onde a missão começou). null: o agente descobre módulos tocados e dependentes.
   suiteCompleta: null,
+  // Modelo do agente que só roda o script de estado do git e devolve a saída literal.
+  modeloConferencia: 'haiku',
 }
 // @config-inicio (substituído por instalar.mjs)
 const CONFIG_PROJETO = {}
@@ -68,7 +70,7 @@ const CONFIG = { ...PADRAO, ...CONFIG_PROJETO, ...(args?.config ?? {}) }
   const texto = v => v === null || typeof v === 'string'
   const erros = Object.keys(CONFIG).filter(k => !(k in PADRAO)).map(k => `chave desconhecida: ${k}`)
   for (const k of ['regrasTestes', 'regrasProjeto', 'revisor', 'leitor', 'suiteCompleta']) if (!texto(CONFIG[k])) erros.push(`${k} deve ser texto ou null`)
-  for (const k of ['formatoCommit', 'idioma', 'exemplosSkills']) if (typeof CONFIG[k] !== 'string') erros.push(`${k} deve ser texto`)
+  for (const k of ['formatoCommit', 'idioma', 'exemplosSkills', 'modeloConferencia']) if (typeof CONFIG[k] !== 'string') erros.push(`${k} deve ser texto`)
   if (!Array.isArray(CONFIG.revisoresPorPasta) || !CONFIG.revisoresPorPasta.every(r => r && typeof r.prefixo === 'string' && typeof r.agentType === 'string')) {
     erros.push('revisoresPorPasta deve ser lista de { prefixo, agentType }')
   }
@@ -119,18 +121,6 @@ function pendenciasDe(c) {
   return `: ${linhas.slice(0, 10).join(', ')}${linhas.length > 10 ? ` e mais ${linhas.length - 10}` : ''}`
 }
 
-const PREPARO = {
-  type: 'object',
-  properties: {
-    limpo: { type: 'boolean' },
-    branch: { type: 'string' },
-    head: { type: 'string' },
-    raiz: { type: 'string' },
-    pendencias: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['limpo', 'branch', 'head', 'raiz', 'pendencias'],
-}
-
 const RESULTADO_FEATURE = {
   type: 'object',
   properties: {
@@ -157,18 +147,10 @@ const RESULTADO_COMMIT = {
   required: ['commitado'],
 }
 
-const CONFERENCIA = {
-  type: 'object',
-  properties: {
-    branch: { type: 'string' },
-    head: { type: 'string' },
-    limpo: { type: 'boolean' },
-    pendencias: { type: 'array', items: { type: 'string' } },
-    commits: { type: 'array', items: { type: 'string' } },
-    arquivos: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['branch', 'head', 'limpo', 'pendencias', 'commits', 'arquivos'],
-}
+// Script instalado no projeto pelo instalar.mjs (fonte: git-estado.mjs no claude-missao).
+const GIT_ESTADO = '.claude/missao/git-estado.mjs'
+// O agente de conferência só devolve a saída literal do script de estado do git; quem a interpreta é o workflow.
+const SAIDA = { type: 'object', properties: { saida: { type: 'string' } }, required: ['saida'] }
 
 const SKILLS = {
   type: 'object',
@@ -266,12 +248,7 @@ async function comRetentativa(rotulo, chamar, antesDeRetentar) {
 }
 
 phase('Preparar')
-const preparo = await comRetentativa('preparo', () => agent(
-  'Rode `git status --porcelain`, `git branch --show-current`, `git rev-parse HEAD` (SHA completo) e ' +
-  '`git rev-parse --show-toplevel` (raiz). ' +
-  'Não altere nada. Informe se a árvore está limpa e devolva em pendencias as linhas do `git status --porcelain`, se houver.',
-  { label: 'preparo', phase: 'Preparar', schema: PREPARO },
-))
+const preparo = await lerGit('HEAD', 'Preparar', 'preparo')
 if (!preparo || !arvoreLimpa(preparo) || !preparo.branch) {
   return {
     parouEm: 'preparo',
@@ -570,14 +547,33 @@ async function implementar(features, fase) {
   return { resultados, commits }
 }
 
-// Lê o estado real do git, sem depender do relato dos workers.
-function lerGit(base, fase) {
-  return comRetentativa('conferência', () => agent(
-    `Sem alterar nada, rode: \`git branch --show-current\`, \`git rev-parse HEAD\`, \`git status --porcelain\`, ` +
-    `\`git rev-list --reverse ${base}..HEAD\` e \`git diff --name-only ${base}..HEAD\`. Devolva os SHAs completos e, ` +
-    'em pendencias, as linhas do `git status --porcelain`.\n' + GIT_PROIBIDO,
-    { label: 'conferência', phase: fase, agentType: comoAgente(CONFIG.leitor), schema: CONFERENCIA, effort: 'low' },
-  ))
+// Lê o estado real do git sem depender do relato dos workers nem da leitura de um modelo: o agente só roda o script
+// instalado e devolve a saída literal, que o workflow interpreta. Saída que não é o JSON esperado conta como queda e a
+// leitura se repete; nunca vira apontamento.
+function estadoDoGit(saida) {
+  let c
+  try {
+    c = JSON.parse(String(saida ?? '').trim())
+  } catch {
+    return null
+  }
+  const lista = v => Array.isArray(v) && v.every(x => typeof x === 'string')
+  const valido = c && typeof c === 'object' && ['head', 'branch', 'raiz'].every(k => typeof c[k] === 'string') &&
+    typeof c.limpo === 'boolean' && lista(c.pendencias) && lista(c.commits) && lista(c.arquivos)
+  return valido ? c : null
+}
+function lerGit(base, fase, label = 'conferência') {
+  return comRetentativa(label, async () => {
+    const r = await agent(
+      `Rode exatamente \`node ${GIT_ESTADO} ${base}\` na raiz do repositório e devolva em saida a saída padrão ` +
+      'literal e completa, sem resumir, reordenar nem comentar. Não rode mais nada. Se o comando falhar, devolva o erro em saida.',
+      { label, phase: fase, agentType: comoAgente(CONFIG.leitor), schema: SAIDA, model: CONFIG.modeloConferencia, effort: 'low' },
+    )
+    if (!r) return null
+    const c = estadoDoGit(r.saida)
+    if (!c) log(`${label}: saída de ${GIT_ESTADO} inválida (${String(r.saida).slice(0, 120)}); repetindo a leitura`)
+    return c
+  })
 }
 
 // Confere que o intervalo tem exatamente os commits declarados.

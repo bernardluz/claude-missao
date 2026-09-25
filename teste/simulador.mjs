@@ -37,6 +37,8 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   caminhoDump        onde o dump aparece (padrão bash.exe.stackdump, na raiz)
 //   ignoraDump         { [feature]: vezes } o agente de commit lista o dump como fora da lista em vez de apagá-lo
 //   apagaAlem          { [feature]: [caminhos] } o agente de commit apaga e informa também o que não é dump
+//   arquivosDeFora     arquivos dos commits que não são da missão (padrão ['z/fora.js'])
+//   conferenciaInvalida vezes que o agente de conferência devolve texto em vez da saída do git-estado.mjs
 export const DUMP = 'bash.exe.stackdump'
 export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0000'], sujo: false }) {
   const o = opcoes
@@ -55,6 +57,8 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   const raiz = o.raiz ?? 'C:/repo'
   const arquivos = o.arquivos ?? ['x/a.js']
   const arquivosGit = o.arquivosGit ?? arquivos
+  const arquivosDeFora = o.arquivosDeFora ?? ['z/fora.js']
+  let invalida = o.conferenciaInvalida ?? 0
   let rodadaValidacao = 0
   let rodadaSuite = 0
   const chamadas = []
@@ -64,7 +68,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   const pendencias = () => [...(estado.sujo ? [' M x/a.js'] : []), ...estado.dumps.map(d => `?? ${d}`)]
 
   const responder = async (prompt, opt) => {
-    chamadas.push({ label: opt.label, phase: opt.phase, agentType: opt.agentType, prompt })
+    chamadas.push({ label: opt.label, phase: opt.phase, agentType: opt.agentType, model: opt.model, effort: opt.effort, prompt })
     const l = opt.label
     if (quedas[l] > 0) {
       quedas[l]--
@@ -74,14 +78,20 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       if (efeito === 'commitaOrfao') estado.git.push('orfao000')
       return null
     }
-    if (l === 'preparo') return { limpo: limpo(), pendencias: pendencias(), branch: 'develop', head: estado.git.at(-1), raiz }
     if (l === 'skills da missão') return { skills: o.skills ?? [] }
-    if (l === 'conferência') {
-      const base = prompt.match(/rev-list --reverse (\w+)\.\.HEAD/)[1]
-      const commits = estado.git.slice(estado.git.indexOf(base) + 1)
+    if (l === 'preparo' || l === 'conferência') {
+      if (invalida > 0) { invalida--; return { saida: 'o repositório tem 3 commits novos e está limpo' } }
+      // Como o git-estado.mjs: `HEAD` como base dá intervalo vazio.
+      const base = prompt.match(/git-estado\.mjs (\S+)`/)[1]
+      const commits = base === 'HEAD' ? [] : estado.git.slice(estado.git.indexOf(base) + 1)
+      const deFora = s => !/^sha\d+$/.test(s)
+      const arquivosPorCommit = Object.fromEntries(commits.map(s => [s, deFora(s) ? arquivosDeFora : arquivosGit]))
       return {
-        branch: o.branchNaConferencia ?? 'develop', head: estado.git.at(-1), limpo: limpo(), pendencias: pendencias(),
-        commits, arquivos: commits.length ? arquivosGit : [],
+        saida: JSON.stringify({
+          branch: l === 'preparo' ? 'develop' : o.branchNaConferencia ?? 'develop', head: estado.git.at(-1), raiz,
+          limpo: limpo(), pendencias: pendencias(), commits,
+          arquivos: [...new Set(commits.flatMap(s => arquivosPorCommit[s]))], arquivosPorCommit,
+        }),
       }
     }
     if (l === 'suíte completa') {

@@ -244,6 +244,17 @@ function classificar(label) {
   return { tipo: 'trabalho', alvo: label }
 }
 
+// Missões novas leem o git por script: o resultado é { saida } com o JSON do git-estado.mjs. As antigas devolviam o
+// objeto direto.
+function estadoGit(resultado) {
+  if (typeof resultado?.saida !== 'string') return resultado ?? null
+  try {
+    return JSON.parse(resultado.saida)
+  } catch {
+    return null
+  }
+}
+
 export function lerExecucao(dir) {
   const journal = lerJournal(path.join(dir, 'journal.jsonl'))
   if (!journal) return null
@@ -269,7 +280,7 @@ export function lerExecucao(dir) {
   const exatos = new Set(daSkill)
   for (const c of chamadas) if (c.tipo === 'trabalho' && !c.correcao) exatos.add(c.alvo)
   const plano = extrairPlano(skillsChamada?.agente?.prompt, { exatos, estrito: daSkill.length > 0 })
-  const preparo = chamadas.find(c => c.label === 'preparo')?.resultado ?? null
+  const preparo = estadoGit(chamadas.find(c => c.label === 'preparo')?.resultado)
   for (const c of chamadas) delete c.agente
   const inativo = Date.now() - ultimaAtividade
   const algumaAberta = chamadas.some(c => c.aberta)
@@ -528,6 +539,10 @@ function resumoDe(c) {
   if ('aprovado' in r) return r.aprovado ? 'aprovado' : `${Array.isArray(r.problemas) ? r.problemas.length : 0} apontamento(s)`
   if ('concluida' in r) return r.concluida ? 'concluída' : 'não concluída'
   if (Array.isArray(r.skills)) return `${r.skills.length} skills`
+  if (typeof r.saida === 'string') {
+    const g = estadoGit(r)
+    return g ? (g.limpo ? `árvore limpa em ${String(g.head ?? '').slice(0, 9)}` : 'árvore suja') : 'saída inválida'
+  }
   if ('limpo' in r) return r.limpo ? `árvore limpa em ${String(r.head ?? '').slice(0, 9)}` : 'árvore suja'
   return null
 }
