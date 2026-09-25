@@ -1011,3 +1011,13 @@ describe('revisão: bug só conta como corrigido depois da correção', () => {
     assert.equal(r.resultado.retomar.cacaFinalFeita, false)
   })
 })
+
+describe('revisão: suíte final e commits de fora', () => {
+  test('a suíte recebe os commits de fora aceitos e o pedido de não corrigir o código deles', async () => {
+    const r = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, foraImpacta: false })
+    assert.equal(r.resultado.concluido, true)
+    assert.match(r.prompt('suíte completa'), /Os commits fora0001 são de fora da missão: não peça correção do código deles/)
+    const sem = await rodar(plano())
+    assert.doesNotMatch(sem.prompt('suíte completa'), /são de fora da missão/)
+  })
+})

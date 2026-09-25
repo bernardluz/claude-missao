@@ -875,6 +875,10 @@ async function validarSuite(anteriores) {
     'Aprove só se tudo passar. Agrupe as falhas por causa provável: um problema por causa, não um por teste, com o ' +
     'arquivo provável e a saída relevante. Se a causa for de ambiente (serviço fora do ar, dependência ou ferramenta ' +
     'ausente, porta ocupada), marque ambiente=true e descreva o que faltou.' + memoria +
+    (deForaAceitos.length
+      ? `\nOs commits ${deForaAceitos.join(', ')} são de fora da missão: não peça correção do código deles. Falha que ` +
+        'venha só deles, descreva-a dizendo que é de fora da missão, para decisão humana.'
+      : '') +
     '\n' + GIT_PROIBIDO, contexto.areas),
     { label: 'suíte completa', phase: 'Suíte final', schema: VALIDACAO },
   ))
