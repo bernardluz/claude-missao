@@ -52,6 +52,8 @@ descartados. Os demais vão para os próximos prompts, para `retomar.contexto` e
 `aprendizados`, junto com `sugestaoAprendizados`: texto pronto para o agente principal revisar e acrescentar a
 `.claude/missao/aprendizados.md`. Esse arquivo, opcional, é embutido pelo instalador e entra em todo prompt de
 etapa como "Aprendizados do projeto"; mudou, reinstale (`--verificar` acusa).
+Como vai em todo prompt, o arquivo precisa de curadoria: junte repetidos, corte o que envelheceu e mantenha só
+técnica e armadilha durável. O instalador avisa, sem falhar, quando ele passa de 60 linhas.
 
 **SPEC simples.** A skill `criar-spec-simples`, instalada no projeto, orienta o agente principal a
 escrever a SPEC na conversa, antes da missão: quem usa, fluxo em cliques, cada peça com uso real,

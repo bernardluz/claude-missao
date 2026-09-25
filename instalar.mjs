@@ -38,6 +38,8 @@ export const ETAPAS_DIR = join(aqui, 'etapas')
 const SUBSTITUI = '<!-- substitui -->'
 const mds = dir => readdirSync(dir).filter(n => n.endsWith('.md')).map(n => n.slice(0, -3)).sort()
 // Aprendizados duráveis do projeto (técnicas e armadilhas), mantidos pelo agente pai em .claude/missao/aprendizados.md.
+// Acima disso o arquivo pesa em todo prompt e pede curadoria: o instalador avisa, sem falhar.
+export const MAX_LINHAS_APRENDIZADOS = 60
 export function lerAprendizados(raizProjeto) {
   const arquivo = join(raizProjeto, '.claude', 'missao', 'aprendizados.md')
   return existsSync(arquivo) ? lf(readFileSync(arquivo, 'utf8')).trim() : ''
@@ -109,7 +111,13 @@ export function instalar(projeto, { verificar = false, forcar = false } = {}) {
   if (!existsSync(join(raiz, '.git'))) throw new Error(`${raiz} não parece ser a raiz de um repositório git`)
   const arquivoConfig = join(raiz, '.claude', 'missao.config.json')
   const config = existsSync(arquivoConfig) ? JSON.parse(readFileSync(arquivoConfig, 'utf8')) : {}
-  const gerado = gerar(readFileSync(NUCLEO, 'utf8'), config, origemAtual(), lerEtapas(raiz), lerAprendizados(raiz))
+  const aprendizados = lerAprendizados(raiz)
+  const linhas = aprendizados ? aprendizados.split('\n').length : 0
+  const avisos = linhas > MAX_LINHAS_APRENDIZADOS
+    ? [`.claude/missao/aprendizados.md tem ${linhas} linhas (teto recomendado: ${MAX_LINHAS_APRENDIZADOS}); ele vai em todo ` +
+      'prompt de etapa: junte, corte o que ficou velho e mantenha só técnica e armadilha durável']
+    : []
+  const gerado = gerar(readFileSync(NUCLEO, 'utf8'), config, origemAtual(), lerEtapas(raiz), aprendizados)
   const destino = join(raiz, '.claude', 'workflows', 'missao.js')
   const copias = COPIAS.map(([origem, relativo]) => ({ destino: join(raiz, relativo), conteudo: lf(readFileSync(origem, 'utf8')) }))
   const lerLf = arquivo => (existsSync(arquivo) ? lf(readFileSync(arquivo, 'utf8')) : null)
@@ -118,7 +126,7 @@ export function instalar(projeto, { verificar = false, forcar = false } = {}) {
   if (verificar) {
     const atual = lerLf(destino)
     const atualizado = atual !== null && semOrigem(atual) === semOrigem(gerado) && copias.every(c => lerLf(c.destino) === c.conteudo)
-    return { destino, destinoSkill, atualizado }
+    return { destino, destinoSkill, atualizado, avisos }
   }
   // Não sobrescreve arquivo mantido à mão: só o que este instalador gerou, salvo --forcar.
   for (const [arquivo, marca] of [[destino, MARCA], ...copias.map(c => [c.destino, MARCA_COPIA])]) {
@@ -130,7 +138,7 @@ export function instalar(projeto, { verificar = false, forcar = false } = {}) {
     mkdirSync(dirname(arquivo), { recursive: true })
     writeFileSync(arquivo, conteudo)
   }
-  return { destino, destinoSkill, config: existsSync(arquivoConfig) ? arquivoConfig : null }
+  return { destino, destinoSkill, config: existsSync(arquivoConfig) ? arquivoConfig : null, avisos }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -142,10 +150,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     if (opcoes.includes('--verificar')) {
       const r = instalar(projeto, { verificar: true })
+      for (const a of r.avisos) console.warn(`aviso: ${a}`)
       console.log(r.atualizado ? `atualizado: ${r.destino} e cópias` : `desatualizado ou ausente: ${r.destino} ou uma das cópias (${COPIAS.map(c => c[1]).join(', ')})`)
       process.exit(r.atualizado ? 0 : 1)
     }
     const r = instalar(projeto, { forcar: opcoes.includes('--forcar') })
+    for (const a of r.avisos) console.warn(`aviso: ${a}`)
     console.log(`instalado: ${r.destino} e ${COPIAS.map(c => c[1]).join(', ')}${r.config ? ` (configuração: ${r.config})` : ' (sem configuração do projeto; usando o padrão)'}`)
   } catch (erro) {
     console.error(`erro: ${erro.message}`)

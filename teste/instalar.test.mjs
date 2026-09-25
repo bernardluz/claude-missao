@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { gerar, instalar, chavesAceitas, lerEtapas, lerAprendizados, NUCLEO, SKILL, ETAPAS_DIR } from '../instalar.mjs'
 import { executar, plano } from './simulador.mjs'
 
@@ -250,4 +250,20 @@ test('embute .claude/missao/aprendizados.md (BOM e CRLF tratados) e a verificaç
   writeFileSync(arquivo, '- Outro.\n')
   assert.equal(instalar(raiz, { verificar: true }).atualizado, false)
   assert.equal(lerAprendizados(projetoTemporario()), '')
+})
+
+test('aprendizados.md acima de 60 linhas gera aviso, sem falhar a instalação', () => {
+  const raiz = projetoTemporario()
+  const arquivo = join(raiz, '.claude', 'missao', 'aprendizados.md')
+  mkdirSync(dirname(arquivo), { recursive: true })
+  writeFileSync(arquivo, Array.from({ length: 60 }, (_, i) => `- item ${i}`).join('\n'))
+  assert.deepEqual(instalar(raiz).avisos, [])
+  writeFileSync(arquivo, Array.from({ length: 61 }, (_, i) => `- item ${i}`).join('\n'))
+  const r = instalar(raiz)
+  assert.equal(r.avisos.length, 1)
+  assert.match(r.avisos[0], /tem 61 linhas \(teto recomendado: 60\)/)
+  assert.equal(instalar(raiz, { verificar: true }).avisos.length, 1)
+  const cli = spawnSync('node', [NUCLEO.replace(/missao\.js$/, 'instalar.mjs'), raiz], { encoding: 'utf8' })
+  assert.equal(cli.status, 0)
+  assert.match(cli.stderr, /^aviso: .*tem 61 linhas/m)
 })
