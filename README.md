@@ -89,7 +89,9 @@ cortes explícitos e critérios de aceite verificáveis.
 - **Retomada.** Toda parada devolve um objeto `retomar`. Passado em `args.retomar` numa nova
   execução, a missão continua do milestone interrompido, desde que o repositório esteja exatamente
   como ficou. O `retomar` traz o plano (`retomar.plano`) e o contexto do plano com os aprendizados
-  (`retomar.contexto`): a retomada não replaneja nem regenera o contexto.
+  (`retomar.contexto`): a retomada não replaneja e só regenera o contexto se ele ficou sem áreas. Leva também os
+  commits de fora aceitos (`deFora`), os bugs corrigidos pela caça (`bugsCorrigidos`) e se a caça final já rodou
+  (`cacaFinalFeita`). Na retomada, os arquivos que a missão já tocou vêm do git.
 
 ## Instalar num projeto
 
@@ -282,7 +284,6 @@ O servidor só escuta em 127.0.0.1 e recusa requisições cujo Host não seja `1
   da feature, ainda para a missão como antes.
 - **Bug repetido.** Quem diz que um achado repete um bug já corrigido é o caçador, a partir da lista
   de corrigidos que recebe; não há comparação textual.
-- **Caça final na retomada.** Retomando direto na suíte final, a caça final não se repete.
 
 ## Desenvolvimento
 
