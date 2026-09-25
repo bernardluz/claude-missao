@@ -175,3 +175,11 @@ test('instala a skill criar-spec-simples', () => {
   assert.match(skill, /^---\nname: criar-spec-simples\n/)
   assert.match(skill, /Instalada pelo `claude-missao`/)
 })
+
+test('complemento de etapa salvo com BOM ainda reconhece <!-- substitui -->', () => {
+  const raiz = projetoTemporario()
+  const dir = join(raiz, '.claude', 'missao', 'etapas')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'aceite.md'), '﻿<!-- substitui -->\r\nSó o do projeto.\r\n')
+  assert.equal(lerEtapas(raiz).aceite, 'Só o do projeto.')
+})

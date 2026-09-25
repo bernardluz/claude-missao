@@ -27,7 +27,8 @@ const MARCA_COPIA = '`claude-missao`'
 const BLOCO = /\/\/ @config-inicio[^\n]*\nconst CONFIG_PROJETO = [\s\S]*?\n\/\/ @config-fim/
 const BLOCO_ETAPAS = /\/\/ @etapas-inicio[^\n]*\nconst ETAPAS = [\s\S]*?\n\/\/ @etapas-fim/
 const MARCA = 'gerado por claude-missao'
-const lf = texto => texto.replace(/\r\n/g, '\n')
+// Sem BOM e com LF: arquivo salvo no Windows não pode esconder o marcador <!-- substitui -->.
+const lf = texto => texto.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
 
 // Técnica de cada etapa: etapas/<etapa>.md no claude-missao. O projeto complementa em .claude/missao/etapas/<etapa>.md;
 // o texto dele vai depois do núcleo, ou o substitui quando a primeira linha é SUBSTITUI.
