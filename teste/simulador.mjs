@@ -50,6 +50,7 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   refuta             o segundo verificador refuta todos os achados
 //   userTesting        { [milestone]: [n falhas por rodada] } resultado do user testing
 //   foraImpacta     resposta do agente que julga commit de fora (padrão true: para como antes)
+//   conferenciaComCerca o agente de conferência devolve o JSON dentro de cerca de código
 //   conferenciaInvalida vezes que o agente de conferência devolve texto em vez da saída do git-estado.mjs
 export const DUMP = 'bash.exe.stackdump'
 export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0000'], sujo: false }) {
@@ -99,17 +100,18 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (l === 'pré-voo') return { ok: !o.preVooFalta, faltando: o.preVooFalta ?? [] }
     if (l === 'preparo' || l === 'conferência') {
       if (invalida > 0) { invalida--; return { saida: 'o repositório tem 3 commits novos e está limpo' } }
+      const cerca = o.conferenciaComCerca ? s => `Saída:\n\`\`\`json\n${s}\n\`\`\`` : s => s
       // Como o git-estado.mjs: `HEAD` como base dá intervalo vazio.
       const base = prompt.match(/git-estado\.mjs (\S+)`/)[1]
       const commits = base === 'HEAD' ? [] : estado.git.slice(estado.git.indexOf(base) + 1)
       const deFora = s => !/^sha\d+$/.test(s)
       const arquivosPorCommit = Object.fromEntries(commits.map(s => [s, deFora(s) ? arquivosDeFora : arquivosGit]))
       return {
-        saida: JSON.stringify({
+        saida: cerca(JSON.stringify({
           branch: l === 'preparo' ? 'develop' : o.branchNaConferencia ?? 'develop', head: estado.git.at(-1), raiz,
           limpo: limpo(), pendencias: pendencias(), commits,
           arquivos: [...new Set(commits.flatMap(s => arquivosPorCommit[s]))], arquivosPorCommit,
-        }),
+        })),
       }
     }
     if (l === 'suíte completa') {

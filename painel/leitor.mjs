@@ -257,7 +257,8 @@ function classificar(label) {
 function estadoGit(resultado) {
   if (typeof resultado?.saida !== 'string') return resultado ?? null
   try {
-    return JSON.parse(resultado.saida)
+    const t = resultado.saida
+    return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1))
   } catch {
     return null
   }

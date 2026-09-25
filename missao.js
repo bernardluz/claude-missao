@@ -773,9 +773,11 @@ async function implementar(features, fase) {
 // instalado e devolve a saída literal, que o workflow interpreta. Saída que não é o JSON esperado conta como queda e a
 // leitura se repete; nunca vira apontamento.
 function estadoDoGit(saida) {
+  // O script imprime um objeto numa linha; cerca de código ou espaço que o agente ponha em volta não conta.
+  const texto = String(saida ?? '')
   let c
   try {
-    c = JSON.parse(String(saida ?? '').trim())
+    c = JSON.parse(texto.slice(texto.indexOf('{'), texto.lastIndexOf('}') + 1))
   } catch {
     return null
   }
