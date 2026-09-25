@@ -979,3 +979,16 @@ describe('revisão: leitura do git', () => {
     assert.match(r.resultado.motivo, /não foi possível ler o git no preparo; última saída de .*: fatal: bad revision/)
   })
 })
+
+describe('revisão: contexto nas etapas de caça e aceite', () => {
+  test('caçador, verificador, caça final e aceite recebem a técnica da etapa e as áreas pertinentes', async () => {
+    const areas = [{ nome: 'Área X', guia: 'copie x/modelo.js', features: ['F1', 'F2', 'F3'] }]
+    const r = await rodarCom({}, plano(), { areas, caca: { M1: [1] } })
+    assert.equal(r.resultado.concluido, true)
+    for (const [label, etapa] of [['caça: geral (M1, rodada 1)', 'caca-bug'], ['verificação 1: achado 1 (M1, rodada 1)', 'caca-bug'],
+      ['caça: interação entre milestones (final, rodada 1)', 'caca-bug'], ['aceite', 'aceite']]) {
+      assert.ok(r.prompt(label).includes(`Técnica da etapa ${etapa}`), label)
+      assert.match(r.prompt(label), /### Área X\ncopie x\/modelo\.js/, label)
+    }
+  })
+})

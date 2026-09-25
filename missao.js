@@ -991,14 +991,14 @@ async function areasDeCaca(m, arquivos) {
 const textoDoAchado = a => `${a.arquivo ?? ''} ${a.problema}`.trim()
 // Um caçador por área sobre o diff; cada achado passa por 2 verificadores que tentam refutá-lo, e só fica o que os dois
 // confirmam. Devolve { confirmados } ou { erro }.
-async function cacar(rotulo, areas, intervalo, foco, corrigidos) {
+async function cacar(rotulo, areas, intervalo, foco, corrigidos, guias) {
   const jaCorrigidos = corrigidos.length
     ? `\nJá corrigidos nesta missão (achou um deles de novo? marque repete=true): ${corrigidos.join(' | ')}`
     : ''
   const porArea = await parallel(areas.map(area => () => comRetentativa(`caça: ${area} (${rotulo})`, () => trabalhar(montar('caca-bug',
     `Cace bugs reais no diff \`git diff ${intervalo}\`, na área: ${area}. ${foco}${jaCorrigidos}\n` +
     'Devolva cada achado com o arquivo e o problema demonstrável (passo a passo ou teste que quebra). Sem achado, ' +
-    `lista vazia. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`),
+    `lista vazia. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`, guias),
     { label: `caça: ${area} (${rotulo})`, phase: 'Caça bug', schema: ACHADOS },
   ))))
   if (porArea.some(r => !r)) return { erro: `um caçador de bugs (${rotulo}) não respondeu` }
@@ -1007,7 +1007,7 @@ async function cacar(rotulo, areas, intervalo, foco, corrigidos) {
     comRetentativa(`verificação ${n}: achado ${i + 1} (${rotulo})`, () => trabalhar(montar('caca-bug',
       `Tente refutar este possível bug em \`git diff ${intervalo}\`: ${textoDoAchado(a)}\n` +
       'Confirme (confirmado=true) só se reproduzir ou se o código não deixar dúvida; na dúvida, confirmado=false. ' +
-      `Explique em motivo. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`),
+      `Explique em motivo. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`, guias),
       { label: `verificação ${n}: achado ${i + 1} (${rotulo})`, phase: 'Caça bug', schema: VEREDITO },
     ))))))
   const confirmados = achados.filter((_, i) => vereditos[i]?.every(v => v?.confirmado === true))
@@ -1041,7 +1041,7 @@ async function conferirAceite() {
   const r = await comRetentativa('aceite', () => trabalhar(montar('aceite',
     `${fonte}\n\nPara cada critério, aponte a evidência no HEAD atual: teste que passou (nome e comando) ou commit que ` +
     `o implementa (\`git log --oneline ${INICIO_MISSAO}..HEAD\`). atendido=true só com evidência concreta; sem ela, ` +
-    `atendido=false e, em evidencia, o que falta para provar. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`),
+    `atendido=false e, em evidencia, o que falta para provar. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`, contexto.areas),
     { label: 'aceite', phase: 'Aceite', schema: ACEITE },
   ))
   if (!r) return { erro: 'o agente de aceite não respondeu' }
@@ -1201,7 +1201,7 @@ for (const [i, m] of pendentes.entries()) {
   if (m.suite && !cacaFinalFeita && milestones.length > 1) {
     const c = await cacar('final, rodada 1', ['interação entre milestones'], `${INICIO_MISSAO}..${head}`,
       `Foque na interação entre os milestones da missão (${milestones.map(x => x.titulo).join(', ')}): contratos entre ` +
-      `eles, dados que um grava e outro lê, ordem de execução.${semDeFora()}`, bugsCorrigidos)
+      `eles, dados que um grava e outro lê, ordem de execução.${semDeFora()}`, bugsCorrigidos, contexto.areas)
     if (c.erro) return pararAqui({ motivo: c.erro })
     const repetidos = c.confirmados.filter(a => a.repete)
     if (repetidos.length) {
@@ -1222,7 +1222,7 @@ for (const [i, m] of pendentes.entries()) {
     const areas = m.caca ?? await areasDeCaca(m, conf.arquivos)
     for (let r = 1; ; r++) {
       const c = await cacar(`${m.titulo}, rodada ${r}`, areas, `${base}..${head}`,
-        `Milestone "${m.titulo}", critério: ${m.criterio}.${semDeFora()}`, bugsCorrigidos)
+        `Milestone "${m.titulo}", critério: ${m.criterio}.${semDeFora()}`, bugsCorrigidos, guiasDoMilestone)
       if (c.erro) return pararAqui({ motivo: c.erro })
       if (!c.confirmados.length) break
       const repetidos = c.confirmados.filter(a => a.repete)
