@@ -46,9 +46,12 @@ O projeto complementa uma etapa em `.claude/missao/etapas/<etapa>.md`: o texto d
 núcleo. Se a primeira linha for `<!-- substitui -->`, o texto do projeto substitui o do núcleo. O
 instalador embute tudo no `missao.js` gerado, porque o script do Workflow não lê arquivos.
 
-**Aprendizados.** Todo worker pode devolver `aprendizados` (fato não óbvio, como "rode com
-forks=1"). Eles vão para os próximos prompts, para `retomar.contexto` e para o resultado final em
-`aprendizados`, para o agente principal levar ao `AGENTS.md` da área.
+**Aprendizados.** Todo worker pode devolver até 3 `aprendizados`: só técnica ou armadilha durável (como
+"rode com forks=1"), nunca estado do momento. Repetidos e o que já está no `aprendizados.md` do projeto são
+descartados. Os demais vão para os próximos prompts, para `retomar.contexto` e para o resultado em
+`aprendizados`, junto com `sugestaoAprendizados`: texto pronto para o agente principal revisar e acrescentar a
+`.claude/missao/aprendizados.md`. Esse arquivo, opcional, é embutido pelo instalador e entra em todo prompt de
+etapa como "Aprendizados do projeto"; mudou, reinstale (`--verificar` acusa).
 
 **SPEC simples.** A skill `criar-spec-simples`, instalada no projeto, orienta o agente principal a
 escrever a SPEC na conversa, antes da missão: quem usa, fluxo em cliques, cada peça com uso real,
