@@ -74,6 +74,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   let rodadaValidacao = 0
   let rodadaSuite = 0
   const rodadaUT = {}
+  let rodadaAceite = 0
   const chamadas = []
   const logs = []
   const novoSha = () => `sha${String(estado.git.length).padStart(5, '0')}`
@@ -125,6 +126,11 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       return { achados: Array.from({ length: n }, (_, i) => ({ arquivo: 'x/a.js', problema: `bug ${r}.${i + 1}`, repete: o.cacaRepete?.[m] === Number(r) })) }
     }
     if (l.startsWith('verificação ')) return { confirmado: !(o.refuta && l.startsWith('verificação 2')), motivo: 'reproduzido' }
+    if (l === 'aceite') {
+      const n = (o.aceiteFalta ?? [])[rodadaAceite++] ?? 0
+      return { criterios: [{ criterio: 'c ok', evidencia: 'teste T passou', atendido: true },
+        ...Array.from({ length: n }, (_, i) => ({ criterio: `c${i + 1}`, evidencia: 'sem teste', atendido: false }))] }
+    }
     if (l.startsWith('user testing: ')) {
       const m = l.slice(14)
       const i = rodadaUT[m] ?? 0

@@ -23,7 +23,7 @@ describe('fluxo principal', () => {
     const r = await rodar(plano())
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.commits, 3)
-    assert.equal(r.agentes, 3 + 4 * 3 + 7 * 2 + 3)
+    assert.equal(r.agentes, 3 + 4 * 3 + 7 * 2 + 5)
     assert.equal(r.contar('suíte completa'), 1)
     assert.match(r.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${r.agentes} agentes`))
     assert.equal(r.contar('revisão: F'), 3)
@@ -821,5 +821,64 @@ describe('prova de contrato, caça bug e user testing por milestone', () => {
   test('user testing sem progresso para', async () => {
     const r = await rodar(comEtapas(), { userTesting: { M1: [1, 1] } })
     assert.match(r.resultado.motivo, /sem progresso na rodada 1: 1 problemas antes, 1 depois/)
+  })
+})
+
+describe('caça final e aceite', () => {
+  test('caça final roda sobre a missão inteira antes da suíte, e o aceite vem depois dela', async () => {
+    const r = await rodar(plano())
+    assert.equal(r.resultado.concluido, true)
+    const ordem = r.chamadas.map(c => c.label)
+    const final = ordem.indexOf('caça: interação entre milestones (final, rodada 1)')
+    assert.ok(final > ordem.lastIndexOf('revisão: M2') && final < ordem.indexOf('suíte completa'))
+    assert.match(r.prompt('caça: interação entre milestones (final, rodada 1)'), /git diff base0000\.\.sha00003/)
+    assert.ok(ordem.indexOf('aceite') > ordem.indexOf('suíte completa'))
+    assert.deepEqual(r.resultado.aceite, [{ criterio: 'c ok', evidencia: 'teste T passou', atendido: true }])
+    assert.match(r.prompt('aceite'), /Critérios de aceite \(os dos milestones\):\n- M1: c\n- M2: c/)
+  })
+
+  test('achado confirmado na caça final vira correção e a suíte roda em seguida', async () => {
+    const r = await rodar(plano(), { caca: { final: [1] } })
+    assert.equal(r.resultado.concluido, true)
+    const ordem = r.chamadas.map(c => c.label)
+    assert.ok(ordem.indexOf('commit: correção 1.1 (Suíte final)') < ordem.indexOf('suíte completa'))
+    assert.equal(r.contar('caça: interação entre milestones'), 1)
+  })
+
+  test('com um só milestone ou retomando na suíte final, não há caça final', async () => {
+    const um = await rodar({ milestones: [plano().milestones[0]] })
+    assert.equal(um.contar('caça: interação'), 0)
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { suite: [2, 2] }, estado)
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.contar('caça: interação'), 0)
+    assert.match(p2.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${p2.agentes} agentes`))
+  })
+
+  test('critério sem evidência vira correção uma vez, com suíte de novo; resolvido, conclui', async () => {
+    const r = await rodar(plano({ aceite: ['POST /x sem permissão devolve 403'] }), { aceiteFalta: [1, 0] })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('aceite'), 2)
+    assert.equal(r.contar('suíte completa'), 2)
+    assert.match(r.prompt('correção 1.1 (Suíte final)'), /critério de aceite sem evidência: c1\. sem teste/)
+    assert.match(r.prompt('aceite'), /Critérios de aceite:\n- POST \/x sem permissão devolve 403/)
+  })
+
+  test('critério que continua sem evidência termina a missão reportando o que faltou', async () => {
+    const r = await rodar(plano(), { aceiteFalta: [1, 1] })
+    assert.equal(r.resultado.parouEm, 'Suíte final')
+    assert.match(r.resultado.motivo, /critérios de aceite sem evidência mesmo depois de uma correção: c1/)
+    assert.deepEqual(r.resultado.faltou.map(c => c.criterio), ['c1'])
+    assert.equal(r.contar('aceite'), 2)
+  })
+
+  test('com spec, o aceite usa a seção de aceite da SPEC', async () => {
+    const r = await rodar({ spec: 'docs/spec.md' })
+    assert.equal(r.resultado.concluido, true)
+    assert.match(r.prompt('aceite'), /docs\/spec\.md\n\nUse os critérios de aceite da SPEC/)
+  })
+
+  test('aceite inválido é recusado', async () => {
+    await assert.rejects(rodar(plano({ aceite: 'tudo' })), /args inválido/)
   })
 })

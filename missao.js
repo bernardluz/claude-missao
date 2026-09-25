@@ -14,7 +14,8 @@ export const meta = {
     { title: 'Corrigir', detail: 'um item por problema apontado, com revisão e commit próprios' },
     { title: 'Caça bug', detail: 'caçador por área; cada achado com 2 verificadores; confirmado vira correção' },
     { title: 'User testing', detail: 'só com jornada no plano: percorre como usuário na stack local' },
-    { title: 'Suíte final', detail: 'suíte completa do projeto ao fim; falhas viram correções' },
+    { title: 'Suíte final', detail: 'caça final entre milestones e suíte completa do projeto; falhas viram correções' },
+    { title: 'Aceite', detail: 'liga cada critério de aceite a uma evidência; sem evidência vira correção uma vez' },
   ],
 }
 
@@ -260,10 +261,11 @@ const SPEC = typeof args?.spec === 'string' && args.spec.trim() ? args.spec.trim
 const planoDado = args?.milestones ?? args?.plano?.milestones ?? args?.retomar?.plano?.milestones ?? null
 const limitesOk = [MAX_RODADAS_CORRECAO, MAX_PROBLEMAS_POR_RODADA, MAX_RODADAS_REVISAO, MAX_FEATURES_POR_MILESTONE, MAX_RODADAS_CACA].every(n => Number.isInteger(n) && n >= 1) &&
   Number.isInteger(MAX_RETENTATIVAS_INFRA) && MAX_RETENTATIVAS_INFRA >= 0
-if (!args || !limitesOk || (!planoDado && !SPEC)) {
+const aceiteOk = args?.aceite === undefined || (Array.isArray(args.aceite) && args.aceite.every(x => typeof x === 'string'))
+if (!args || !limitesOk || !aceiteOk || (!planoDado && !SPEC)) {
   throw new Error('args inválido: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } ou ' +
     '{ spec }, com maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, ' +
-    'maxRetentativasInfra?, maxRodadasCaca?, retomar?; limites inteiros ≥ 1 e retentativas ≥ 0')
+    'maxRetentativasInfra?, maxRodadasCaca?, aceite?: [critérios], retomar?; limites inteiros ≥ 1 e retentativas ≥ 0')
 }
 
 // A suíte completa roda uma vez ao fim, como uma etapa sem features: falha vira correção no mesmo loop.
@@ -417,15 +419,21 @@ const planoTexto = pendentes.filter(m => !m.suite).map(m =>
 ).join('\n\n')
 
 const totalFeatures = pendentes.reduce((n, m) => n + m.features.length, 0)
-// preparo, pré-voo e contexto (se não veio do retomar); por feature: worker, revisão, commit e conferência; por
+// preparo, pré-voo, conferência da retomada e contexto (se não veio do retomar); por feature: worker, revisão, commit e conferência; por
 // milestone: prova de contrato, 2 conferências, 2 validadores, caça (um caçador por área, mais o agente que deriva as
-// áreas se o plano não as traz) e user testing se houver jornada; suíte final: 2 conferências + 1 validador
+// áreas se o plano não as traz) e user testing se houver jornada; fim: caça final (com 2+ milestones, fora da
+// retomada na suíte), 2 conferências, suíte e aceite
 const porMilestone = m => 5 + (m.caca ? m.caca.length : 2) + (m.userTesting ? 1 : 0)
-const estimativa = 2 + (retomar?.contexto ? 0 : 1) + 4 * totalFeatures +
-  pendentes.filter(m => !m.suite).reduce((n, m) => n + porMilestone(m), 0) + 3
+const estimativa = 2 + (retomar ? 1 : 0) + (retomar?.contexto ? 0 : 1) + 4 * totalFeatures +
+  pendentes.filter(m => !m.suite).reduce((n, m) => n + porMilestone(m), 0) +
+  (milestones.length > 1 && inicio < milestones.length ? 1 : 0) + 4
 log(`Estimativa mínima: ${estimativa} agentes a partir daqui (sem contar correções e retentativas)`)
 
 const relatorio = []
+// Bugs que a caça confirmou e a missão corrigiu: confirmado de novo, para a missão.
+const bugsCorrigidos = []
+// Critérios de aceite com a evidência de cada um, preenchidos ao fim.
+let aceite = null
 
 // Antes de qualquer commit: o ambiente roda o que a suíte e os testes vão precisar? Roda também na retomada.
 phase('Pré-voo')
@@ -974,6 +982,40 @@ async function cacar(rotulo, areas, intervalo, foco, corrigidos) {
   return { confirmados }
 }
 
+const ACEITE = {
+  type: 'object',
+  properties: {
+    aprendizados: APRENDIZADOS,
+    criterios: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { criterio: { type: 'string' }, evidencia: { type: 'string' }, atendido: { type: 'boolean' } },
+        required: ['criterio', 'atendido'],
+      },
+    },
+  },
+  required: ['criterios'],
+}
+// Liga cada critério de aceite (args.aceite, a seção de aceite da SPEC ou os critérios dos milestones) a uma evidência.
+async function conferirAceite() {
+  const fonte = Array.isArray(args.aceite) && args.aceite.length
+    ? `Critérios de aceite:\n- ${args.aceite.join('\n- ')}`
+    : SPEC
+      ? `${SPEC_NO_PROMPT()}\n\nUse os critérios de aceite da SPEC (a seção de aceite; se ela não tiver, os critérios dos milestones abaixo).\n` +
+        milestones.map(m => `- ${m.titulo}: ${m.criterio}`).join('\n')
+      : `Critérios de aceite (os dos milestones):\n${milestones.map(m => `- ${m.titulo}: ${m.criterio}`).join('\n')}`
+  const r = await comRetentativa('aceite', () => trabalhar(montar('aceite',
+    `${fonte}\n\nPara cada critério, aponte a evidência no HEAD atual: teste que passou (nome e comando) ou commit que ` +
+    `o implementa (\`git log --oneline ${INICIO_MISSAO}..HEAD\`). atendido=true só com evidência concreta; sem ela, ` +
+    `atendido=false e, em evidencia, o que falta para provar. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`),
+    { label: 'aceite', phase: 'Aceite', schema: ACEITE },
+  ))
+  if (!r) return { erro: 'o agente de aceite não respondeu' }
+  if (!r.criterios.length) return { erro: 'o aceite não listou nenhum critério' }
+  return { criterios: r.criterios, faltou: r.criterios.filter(c => !c.atendido) }
+}
+
 // Jornada do milestone como usuário, na stack local.
 async function testarComoUsuario(m, anteriores) {
   const memoria = anteriores.length
@@ -1109,24 +1151,41 @@ for (const [i, m] of pendentes.entries()) {
 
   conf = await conferir(base, commits)
   if (!conf.ok) return pararAqui({ motivo: conf.motivo })
-  let e = await scrutiny()
+  let e = null
+
+  // Caça final, curta: uma rodada sobre o diff da missão inteira, focada na interação entre milestones. As correções
+  // dela seguem para a suíte final logo abaixo. Retomando na suíte final, a caça final não se repete.
+  if (m.suite && !retomando && milestones.length > 1) {
+    const c = await cacar('final, rodada 1', ['interação entre milestones'], `${INICIO_MISSAO}..${head}`,
+      `Foque na interação entre os milestones da missão (${milestones.map(x => x.titulo).join(', ')}): contratos entre ` +
+      'eles, dados que um grava e outro lê, ordem de execução.', bugsCorrigidos)
+    if (c.erro) return pararAqui({ motivo: c.erro })
+    const repetidos = c.confirmados.filter(a => a.repete)
+    if (repetidos.length) {
+      return pararAqui({ motivo: 'a caça final confirmou de novo bug já corrigido nesta missão; decida à mão antes de retomar', problemas: repetidos })
+    }
+    bugsCorrigidos.push(...c.confirmados.map(textoDoAchado))
+    if (c.confirmados.length) e = await rodadaDeCorrecao(c.confirmados)
+    if (e) return pararAqui(e)
+  }
+
+  e = await scrutiny()
   if (e) return pararAqui(e)
 
   // Caça bug depois que o scrutiny passa: bug confirmado vira correção, volta ao scrutiny e a caça recomeça. Para na
   // rodada sem bug confirmado ou no teto; bug confirmado de novo depois de corrigido para a missão.
   if (!m.suite) {
     const areas = m.caca ?? await areasDeCaca(m, conf.arquivos)
-    const corrigidos = []
     for (let r = 1; ; r++) {
       const c = await cacar(`${m.titulo}, rodada ${r}`, areas, `${base}..${head}`,
-        `Milestone "${m.titulo}", critério: ${m.criterio}.`, corrigidos)
+        `Milestone "${m.titulo}", critério: ${m.criterio}.`, bugsCorrigidos)
       if (c.erro) return pararAqui({ motivo: c.erro })
       if (!c.confirmados.length) break
       const repetidos = c.confirmados.filter(a => a.repete)
       if (repetidos.length) {
         return pararAqui({ motivo: 'a caça confirmou de novo bug já corrigido nesta missão; decida à mão antes de retomar', problemas: repetidos })
       }
-      corrigidos.push(...c.confirmados.map(textoDoAchado))
+      bugsCorrigidos.push(...c.confirmados.map(textoDoAchado))
       e = (await rodadaDeCorrecao(c.confirmados)) ?? await scrutiny()
       if (e) return pararAqui(e)
       if (r >= MAX_RODADAS_CACA) {
@@ -1142,6 +1201,23 @@ for (const [i, m] of pendentes.entries()) {
     if (e) return pararAqui(e)
   }
 
+  // Aceite, com a suíte verde: cada critério ligado a uma evidência. Critério sem evidência vira correção uma vez (que
+  // passa pela suíte de novo); se continuar sem, a missão termina reportando o que faltou.
+  if (m.suite) {
+    let a = await conferirAceite()
+    if (!a.erro && a.faltou.length) {
+      e = (await rodadaDeCorrecao(a.faltou.map(c => ({ problema: `critério de aceite sem evidência: ${c.criterio}. ${c.evidencia ?? ''}`.trim() }))))
+        ?? await scrutiny()
+      if (e) return pararAqui(e)
+      a = await conferirAceite()
+    }
+    if (a.erro) return pararAqui({ motivo: a.erro })
+    if (a.faltou.length) {
+      return pararAqui({ motivo: `critérios de aceite sem evidência mesmo depois de uma correção: ${a.faltou.map(c => c.criterio).join(' | ')}`, faltou: a.faltou, aceite: a.criterios })
+    }
+    aceite = a.criterios
+  }
+
   // Os validadores rodam depois da última conferência: confirma que não sujaram a árvore nem commitaram.
   conf = await conferir(base, commits)
   if (!conf.ok) return pararAqui({ motivo: `após validação: ${conf.motivo}` })
@@ -1149,4 +1225,4 @@ for (const [i, m] of pendentes.entries()) {
   relatorio.push({ milestone: m.titulo, aprovado: true, rodadasCorrecao: rodada, commits: `${base}..${head}`, features: feitas })
 }
 
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, contexto, aprendizados: contexto.aprendizados, relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, contexto, aprendizados: contexto.aprendizados, relatorio }
