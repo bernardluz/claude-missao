@@ -309,6 +309,9 @@ if (retomar && (!planoDado || ![...planoDado, SUITE].some(m => m.titulo === reto
 
 // Contexto da missão: áreas do plano (hidratação, gerada uma vez) e aprendizados dos workers. Volta no retomar.
 const contexto = { areas: [], aprendizados: [] }
+// Estado da missão que atravessa a retomada: caça final já feita e bugs que a caça confirmou e a missão corrigiu.
+let cacaFinalFeita = retomar?.cacaFinalFeita === true
+const bugsCorrigidos = Array.isArray(retomar?.bugsCorrigidos) ? retomar.bugsCorrigidos.filter(b => typeof b === 'string') : []
 if (retomar?.contexto) {
   const lista = v => (Array.isArray(v) ? v : [])
   contexto.areas = lista(retomar.contexto.areas)
@@ -425,16 +428,14 @@ const totalFeatures = pendentes.reduce((n, m) => n + m.features.length, 0)
 // áreas se o plano não as traz) e user testing se houver jornada; fim: caça final (com 2+ milestones, fora da
 // retomada na suíte), 2 conferências, suíte e aceite
 const porMilestone = m => 5 + (m.caca ? m.caca.length : 2) + (m.userTesting ? 1 : 0)
-const estimativa = 2 + (retomar ? 1 : 0) + (retomar?.contexto ? 0 : 1) + 4 * totalFeatures +
+const estimativa = 2 + (retomar ? 1 : 0) + (contexto.areas.length || !planoTexto ? 0 : 1) + 4 * totalFeatures +
   pendentes.filter(m => !m.suite).reduce((n, m) => n + porMilestone(m), 0) +
-  (milestones.length > 1 && inicio < milestones.length ? 1 : 0) + 4
+  (milestones.length > 1 && !cacaFinalFeita ? 1 : 0) + 4
 log(`Estimativa mínima: ${estimativa} agentes a partir daqui (sem contar correções e retentativas)`)
 
 const relatorio = []
 // Commits de fora aceitos (não impactam a missão), levados no retomar: não contam como da missão.
 const deForaAceitos = Array.isArray(args.retomar?.deFora) ? args.retomar.deFora.filter(s => typeof s === 'string') : []
-// Bugs que a caça confirmou e a missão corrigiu: confirmado de novo, para a missão.
-const bugsCorrigidos = []
 // Critérios de aceite com a evidência de cada um, preenchidos ao fim.
 let aceite = null
 
@@ -460,7 +461,8 @@ if (!preVoo || !preVoo.ok) {
 // Hidratação, como a Factory: o contexto do plano (guias por área, montados a partir do código atual) é gerado UMA vez
 // por missão e volta no `retomar`; a retomada o reaproveita, junto com os aprendizados, em vez de regenerá-lo.
 phase('Contexto')
-if (retomar?.contexto) {
+// Só reaproveita contexto com áreas: parada no pré-voo, ou agente de contexto que caiu, deixa o contexto vazio.
+if (contexto.areas.length) {
   log('Contexto do plano reaproveitado da execução anterior')
 } else if (planoTexto) {
   const gerado = await comRetentativa('contexto do plano', () => agent(
@@ -1070,7 +1072,7 @@ function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
     parouEm: m.titulo, ...extra, plano: { milestones }, contexto, aprendizados: contexto.aprendizados,
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos] },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1183,8 +1185,8 @@ for (const [i, m] of pendentes.entries()) {
   let e = null
 
   // Caça final, curta: uma rodada sobre o diff da missão inteira, focada na interação entre milestones. As correções
-  // dela seguem para a suíte final logo abaixo. Retomando na suíte final, a caça final não se repete.
-  if (m.suite && !retomando && milestones.length > 1) {
+  // dela seguem para a suíte final logo abaixo. Feita, vai marcada no retomar e não se repete na retomada.
+  if (m.suite && !cacaFinalFeita && milestones.length > 1) {
     const c = await cacar('final, rodada 1', ['interação entre milestones'], `${INICIO_MISSAO}..${head}`,
       `Foque na interação entre os milestones da missão (${milestones.map(x => x.titulo).join(', ')}): contratos entre ` +
       `eles, dados que um grava e outro lê, ordem de execução.${semDeFora()}`, bugsCorrigidos)
@@ -1196,6 +1198,7 @@ for (const [i, m] of pendentes.entries()) {
     bugsCorrigidos.push(...c.confirmados.map(textoDoAchado))
     if (c.confirmados.length) e = await rodadaDeCorrecao(c.confirmados)
     if (e) return pararAqui(e)
+    cacaFinalFeita = true
   }
 
   e = await scrutiny()

@@ -7,8 +7,8 @@ import { NUCLEO, gerar } from '../instalar.mjs'
 const fonte = carregar(NUCLEO)
 const rodar = (args, opcoes, estado) => executar(fonte, args, opcoes, estado)
 // Configuração do projeto entra como na instalação real: embutida em CONFIG_PROJETO.
-const rodarCom = (config, args, opcoes) =>
-  executar(gerar(readFileSync(NUCLEO, 'utf8'), config).replace('export const meta', 'const meta'), args, opcoes)
+const rodarCom = (config, args, opcoes, estado) =>
+  executar(gerar(readFileSync(NUCLEO, 'utf8'), config).replace('export const meta', 'const meta'), args, opcoes, estado)
 const CONFIG_EXEMPLO = {
   revisor: 'reviewer',
   revisoresPorPasta: [{ prefixo: 'services/', agentType: 'kotlin-reviewer' }],
@@ -730,6 +730,9 @@ describe('spec, planejamento e pré-voo', () => {
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
     assert.equal(p2.resultado.concluido, true)
     assert.equal(p2.contar('pré-voo'), 1)
+    // A parada no pré-voo não tinha contexto: a retomada o gera em vez de reaproveitar um vazio.
+    assert.deepEqual(p1.resultado.retomar.contexto.areas, [])
+    assert.equal(p2.contar('contexto do plano'), 1)
   })
 })
 
@@ -926,5 +929,38 @@ describe('revisão: commit de fora aceito fica fora do escopo', () => {
     for (const label of ['revisão: M1', 'testes: M1', 'correção 1.1 (M1)', 'caça: geral (M1, rodada 1)']) {
       assert.match(r.prompt(label), /Ignore os commits de fora da missão \(fora0001\)/, label)
     }
+  })
+})
+
+describe('revisão: estado que atravessa a retomada', () => {
+  test('contexto sem áreas (agente caiu) é gerado de novo na retomada', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { quedas: { 'contexto do plano': 3 }, validacao: [2, 2] }, estado)
+    assert.deepEqual(p1.resultado.retomar.contexto.areas, [])
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), { areas: [{ nome: 'A', guia: 'g', features: ['F3'] }] }, estado)
+    assert.equal(p2.contar('contexto do plano'), 1)
+    assert.match(p2.prompt('F3'), /### A\ng/)
+  })
+
+  test('parada durante a caça final: a retomada na suíte final faz a caça final', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const label = 'caça: interação entre milestones (final, rodada 1)'
+    const p1 = await rodar(plano(), { quedas: { [label]: 3 } }, estado)
+    assert.equal(p1.resultado.parouEm, 'Suíte final')
+    assert.equal(p1.resultado.retomar.cacaFinalFeita, false)
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar(label), 1)
+    assert.match(p2.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${p2.agentes} agentes`))
+  })
+
+  test('bugs corrigidos vão no retomar: bug repetido é detectado depois da retomada', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { caca: { M1: [1] }, validacao: [0, 0, 2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'M2')
+    assert.deepEqual(p1.resultado.retomar.bugsCorrigidos, ['x/a.js bug 1.1'])
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), { caca: { M2: [1] }, cacaRepete: { M2: 1 } }, estado)
+    assert.match(p2.prompt('caça: geral (M2, rodada 1)'), /Já corrigidos nesta missão .*: x\/a\.js bug 1\.1/)
+    assert.match(p2.resultado.motivo, /confirmou de novo bug já corrigido/)
   })
 })
