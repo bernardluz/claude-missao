@@ -108,7 +108,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       if (invalida > 0) { invalida--; return { saida: 'o repositório tem 3 commits novos e está limpo' } }
       const cerca = o.conferenciaComCerca ? s => `Saída:\n\`\`\`json\n${s}\n\`\`\`` : s => s
       // Como o git-estado.mjs: `HEAD` como base dá intervalo vazio.
-      const base = prompt.match(/git-estado\.mjs (\S+)`/)[1]
+      const [, base, baseMilestone, foraTexto] = prompt.match(/git-estado\.mjs (\S+)(?: --resumo (\S+)((?: \S+)*))?`/)
       const commits = base === 'HEAD' ? [] : estado.git.slice(estado.git.indexOf(base) + 1)
       const deFora = s => !/^sha\d+$/.test(s)
       // Os arquivos de cada commit ficam gravados no estado na primeira leitura, como no git real entre execuções.
@@ -120,6 +120,19 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       const saida = {
         branch: l === 'preparo' ? 'develop' : o.branchNaConferencia ?? 'develop', head: estado.git.at(-1), raiz,
         limpo: limpo(), pendencias: pendencias(), commits, arquivos: arquivosDoIntervalo, arquivosPorCommit, contagem,
+      }
+      if (baseMilestone) {
+        // Modo compacto: uniões já feitas, sem os commits de fora passados e sem arquivosPorCommit.
+        const foraPassados = (foraTexto ?? '').trim().split(/\s+/).filter(Boolean)
+        const daMissao = commits.filter(s => !foraPassados.includes(s))
+        const desde = baseMilestone === base ? 0 : commits.indexOf(baseMilestone) + 1
+        const uniao = lista => [...new Set(lista.flatMap(s => arquivosPorCommit[s]))]
+        delete saida.arquivosPorCommit
+        saida.resumo = true
+        saida.arquivos = uniao(daMissao)
+        saida.arquivosDoMilestone = uniao(daMissao.filter(s => commits.indexOf(s) >= desde))
+        saida.contagem = { ...contagem, arquivos: saida.arquivos.length, arquivosDoMilestone: saida.arquivosDoMilestone.length }
+        return { saida: cerca(JSON.stringify(saida)) }
       }
       if (resumida > 0 && commits.length > 1) { resumida--; saida.commits = [commits.at(-1)] }
       if (semPorCommit > 0) { semPorCommit--; delete saida.arquivosPorCommit }

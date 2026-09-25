@@ -795,18 +795,22 @@ function estadoDoGit(saida) {
   const lista = v => Array.isArray(v) && v.every(x => typeof x === 'string')
   const valido = c && typeof c === 'object' && ['head', 'branch', 'raiz'].every(k => typeof c[k] === 'string') &&
     typeof c.limpo === 'boolean' && lista(c.pendencias) && lista(c.commits) && lista(c.arquivos) &&
-    c.arquivosPorCommit && typeof c.arquivosPorCommit === 'object' &&
-    Object.keys(c.arquivosPorCommit).length === c.commits.length && c.commits.every(s => lista(c.arquivosPorCommit[s])) &&
+    (c.resumo === true
+      // Modo compacto: arquivos da missão e do milestone já unidos pelo script, sem arquivosPorCommit.
+      ? lista(c.arquivosDoMilestone) && c.contagem?.arquivosDoMilestone === c.arquivosDoMilestone.length
+      : c.arquivosPorCommit && typeof c.arquivosPorCommit === 'object' &&
+        Object.keys(c.arquivosPorCommit).length === c.commits.length && c.commits.every(s => lista(c.arquivosPorCommit[s]))) &&
     // A contagem que o script imprime denuncia lista resumida ou cortada por quem repassou a saída.
     c.contagem?.commits === c.commits.length && c.contagem?.arquivos === c.arquivos.length &&
     c.contagem?.pendencias === c.pendencias.length
   return valido ? c : null
 }
 // Lê ao menos duas vezes, mesmo com maxRetentativasInfra 0: saída inválida é ruído do agente, não queda.
-function lerGit(base, fase, label = 'conferência') {
+// resumo: argumentos do modo compacto (--resumo <base do milestone> [<sha de fora>...]).
+function lerGit(base, fase, label = 'conferência', resumo = '') {
   return comRetentativa(label, async () => {
     const r = await agent(
-      `Rode exatamente \`node ${GIT_ESTADO} ${base}\` na raiz do repositório e devolva em saida a saída padrão ` +
+      `Rode exatamente \`node ${GIT_ESTADO} ${base}${resumo}\` na raiz do repositório e devolva em saida a saída padrão ` +
       'literal e completa, sem resumir, reordenar nem comentar. Não rode mais nada. Se o comando falhar, devolva o erro em saida.',
       { label, phase: fase, agentType: comoAgente(CONFIG.leitor), schema: SAIDA, model: CONFIG.modeloConferencia, effort: 'low' },
     )
@@ -1098,8 +1102,9 @@ for (const [i, m] of pendentes.entries()) {
   arquivosDoMilestone = new Set()
   if (retomando) {
     // Só retoma se o repositório está exatamente como a execução anterior deixou: nada de commit alheio no intervalo.
-    // Lê a missão inteira (INICIO_MISSAO..HEAD) para também recuperar os arquivos que ela já commitou.
-    const c = await lerGit(INICIO_MISSAO, 'Preparar')
+    // Lê a missão inteira (INICIO_MISSAO..HEAD) para também recuperar os arquivos que ela já commitou, no modo compacto
+    // do script: em missão grande, arquivos por commit fariam uma saída que o modelo barato poderia cortar.
+    const c = await lerGit(INICIO_MISSAO, 'Preparar', 'conferência', [' --resumo', base, ...deForaAceitos].join(' '))
     const esperado = retomar.commits
     const desde = !c ? -1 : mesmoSha(base, INICIO_MISSAO) ? 0 : c.commits.findIndex(s => mesmoSha(s, base)) + 1
     const doMilestone = c && (desde > 0 || mesmoSha(base, INICIO_MISSAO)) ? c.commits.slice(desde) : null
@@ -1117,12 +1122,8 @@ for (const [i, m] of pendentes.entries()) {
       }, jaConcluidas), retomar }
     }
     // Arquivos que a missão já commitou, sem os dos commits de fora aceitos: commit de fora que tocar um deles para.
-    for (const s of c.commits.filter(s => !deForaAceitos.some(d => mesmoSha(d, s)))) {
-      for (const a of (c.arquivosPorCommit?.[s] ?? []).map(normalizar)) {
-        arquivosDaMissao.add(a)
-        if (doMilestone.includes(s)) arquivosDoMilestone.add(a)
-      }
-    }
+    for (const a of c.arquivos.map(normalizar)) arquivosDaMissao.add(a)
+    for (const a of c.arquivosDoMilestone.map(normalizar)) arquivosDoMilestone.add(a)
     log(`Retomando "${m.titulo}" sobre ${base}: ${esperado.length} commits anteriores, ${jaConcluidas.length} itens ` +
       `concluídos, ${arquivosDaMissao.size} arquivos já tocados pela missão; orçamento de correções recomeça em ${MAX_RODADAS_CORRECAO} rodadas`)
   }

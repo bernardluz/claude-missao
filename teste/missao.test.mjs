@@ -900,7 +900,7 @@ describe('revisão: retomada e commits de fora', () => {
     assert.equal(p2.resultado.parouEm, 'M2')
     assert.match(p2.resultado.motivo, /toca arquivo da missão: x\/a\.js$/)
     assert.equal(p2.contar('commit de fora'), 0)
-    assert.match(p2.prompt('conferência'), /git-estado\.mjs base0000`/)
+    assert.match(p2.prompt('conferência'), /git-estado\.mjs base0000 --resumo sha\d{5}`/)
   })
 
   test('commit de fora aceito vai no retomar e não conta como arquivo da missão na retomada', async () => {
@@ -913,6 +913,8 @@ describe('revisão: retomada e commits de fora', () => {
     }, estado)
     assert.equal(p2.resultado.concluido, true)
     assert.equal(p2.contar('commit de fora'), 1)
+    // A retomada lê a missão no modo compacto do script, passando os commits de fora já aceitos.
+    assert.match(p2.prompt('conferência'), /git-estado\.mjs base0000 --resumo sha\d{5} fora0001`/)
   })
 })
 
