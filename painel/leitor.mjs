@@ -241,6 +241,14 @@ function classificar(label) {
   if (correcao) return { tipo: 'trabalho', alvo: label, correcao: { rodada: Number(correcao[1]), milestone: correcao[3] } }
   if (label === 'suíte completa') return { tipo: 'suite', alvo: SUITE }
   if (['preparo', 'skills da missão', 'contexto do plano', 'conferência'].includes(label)) return { tipo: label, alvo: null }
+  // Etapas da missão v2. Globais: sem alvo. Por milestone: ficam junto das validações dele; "final" é a suíte final.
+  if (['simplicidade', 'planejar', 'pré-voo', 'aceite', 'commit de fora'].includes(label)) return { tipo: 'etapa', alvo: null }
+  const doMilestone = label.match(/^(contrato|áreas de caça|user testing): (.+)$/) ??
+    label.match(/^(caça|verificação \d+): .* \((.+), rodada \d+\)$/)
+  if (doMilestone) {
+    const tipo = doMilestone[1] === 'contrato' ? 'contrato' : doMilestone[1] === 'user testing' ? 'userTesting' : 'caca'
+    return { tipo, alvo: doMilestone[2] === 'final' ? SUITE : doMilestone[2] }
+  }
   return { tipo: 'trabalho', alvo: label }
 }
 
@@ -374,7 +382,7 @@ function montarMissao(id, runs) {
     for (const c of r.chamadas) {
       const chamada = { ...c, execucao, viva: r.viva, ref: `${r.runId}/${c.agentId}` }
       linhaDoTempo.push(chamada)
-      if (c.tipo === 'testes' || (c.tipo === 'revisao' && porTitulo.has(c.alvo))) {
+      if (['testes', 'contrato', 'caca', 'userTesting'].includes(c.tipo) || (c.tipo === 'revisao' && porTitulo.has(c.alvo))) {
         porTitulo.get(c.alvo)?.validacoes.push(chamada)
         continue
       }
@@ -450,12 +458,13 @@ function montarMissao(id, runs) {
             : !comAtividade ? 'pendente'
               : ultima.viva ? 'rodando' : 'parou'
     m.rodadasCorrecao = m.correcoes.filter(f => f.execucao === runs.length).reduce((n, f) => Math.max(n, f.rodada ?? 0), 0)
-    m.problemasValidacao = validado ? [] : [ultimaTestes, ultimaRevisao, ultimaSuite]
+    const ultimaUserTesting = m.validacoes.findLast(c => c.tipo === 'userTesting')
+    m.problemasValidacao = validado ? [] : [ultimaTestes, ultimaRevisao, ultimaSuite, ultimaUserTesting]
       .filter(c => c?.resultado && !c.resultado.aprovado)
       .flatMap(c => (Array.isArray(c.resultado.problemas) ? c.resultado.problemas : []).map(p => ({ origem: c.label, ...p })))
     m.validacoes = m.validacoes.map(c => ({
       label: c.label,
-      estado: c.aberta ? (c.viva ? 'rodando' : 'interrompido') : c.caiu ? 'caiu' : c.resultado?.aprovado ? 'aprovado' : 'reprovado',
+      estado: c.aberta ? (c.viva ? 'rodando' : 'interrompido') : c.caiu ? 'caiu' : aprovou(c) ? 'aprovado' : 'reprovado',
     }))
     if (!m.suite) {
       total += m.features.length
@@ -495,6 +504,14 @@ function montarMissao(id, runs) {
   }
 }
 
+// Contrato aprova quando todas as premissas conferem; na caça, achado ou verificação que confirma bug reprova.
+function aprovou(c) {
+  const r = c.resultado
+  if (c.tipo === 'contrato') return Array.isArray(r?.premissas) && r.premissas.every(p => p.confere)
+  if (c.tipo === 'caca') return !!r && !(r.achados?.length || r.confirmado)
+  return r?.aprovado === true
+}
+
 function estadoChamada(c) {
   return c.aberta ? (c.viva ? 'rodando' : 'interrompido') : c.caiu ? 'caiu' : 'ok'
 }
@@ -528,6 +545,9 @@ function rotuloEtapa(c) {
   if (c.tipo === 'ajuste') return `ajuste ${c.rodada} de ${c.alvo}`
   if (c.tipo === 'testes') return `testes de ${c.alvo}`
   if (c.tipo === 'suite') return 'suíte completa'
+  if (c.tipo === 'contrato') return `prova de contrato de ${c.alvo}`
+  if (c.tipo === 'caca') return `caça bug em ${c.alvo}`
+  if (c.tipo === 'userTesting') return `user testing de ${c.alvo}`
   if (c.tipo === 'trabalho') return `implementando ${c.alvo}`
   return c.label
 }
@@ -541,6 +561,14 @@ function resumoDe(c) {
   if ('concluida' in r) return r.concluida ? 'concluída' : 'não concluída'
   if (Array.isArray(r.skills)) return `${r.skills.length} skills`
   if (Array.isArray(r.areas)) return `${r.areas.length} áreas`
+  if (Array.isArray(r.premissas)) return `${r.premissas.length} premissa(s), ${r.premissas.filter(x => !x.confere).length} não conferem`
+  if (Array.isArray(r.achados)) return `${r.achados.length} achado(s)`
+  if ('confirmado' in r) return r.confirmado ? 'bug confirmado' : 'refutado'
+  if (Array.isArray(r.faltando)) return r.ok ? 'ambiente pronto' : `falta: ${r.faltando.join(' | ')}`
+  if (Array.isArray(r.perguntas)) return r.ok && !r.perguntas.length && !r.cortes?.length ? 'SPEC simples' : `${r.perguntas.length} pergunta(s), ${r.cortes?.length ?? 0} corte(s)`
+  if (Array.isArray(r.milestones)) return `${r.milestones.length} milestones`
+  if (Array.isArray(r.criterios)) return `${r.criterios.filter(x => x.atendido).length} de ${r.criterios.length} critérios com evidência`
+  if ('impacta' in r) return r.impacta ? `impacta: ${r.motivo ?? ''}` : 'não impacta'
   if (typeof r.saida === 'string') {
     const g = estadoGit(r)
     return g ? (g.limpo ? `árvore limpa em ${String(g.head ?? '').slice(0, 9)}` : 'árvore suja') : 'saída inválida'

@@ -278,7 +278,7 @@ function esqueleto(m) {
       <div id="ms-atual"></div><div id="ms-lista"></div></div>
     <aside class="col"><section class="cartao"><div class="cab"><h2>Atividade</h2><span class="suave" style="font-size:12px">clique para ver ao vivo</span></div><div class="ativ" id="ativ"></div></section>
       <section class="cartao"><div class="cab"><h2>Commits</h2><span class="suave" style="font-size:12px" id="n-commits"></span></div><div class="commits" id="commits"></div></section>
-      <section class="cartao"><details class="bloco" data-id="skills" ${aberto('skills') ? 'open' : ''}><summary class="cab" style="border-bottom:0"><h2>Skills da missão</h2><span class="suave" style="font-size:12px" id="n-skills"></span></summary><div id="skills"></div></details></section></aside></div>`
+      <section class="cartao"><details class="bloco" data-id="skills" ${aberto('skills') ? 'open' : ''}><summary class="cab" style="border-bottom:0"><h2>Contexto do plano</h2><span class="suave" style="font-size:12px" id="n-skills"></span></summary><div id="skills"></div></details></section></aside></div>`
   $('#vivo-seguir').onclick = () => { vivo.seguir = !vivo.seguir; if (vivo.seguir && missaoAtual?.agora) abrirVivo(missaoAtual.agora.ref, missaoAtual.agora.label, perfil(missaoAtual.agora)); pintarSeguir() }
   $('#vivo-tarefa').onclick = () => { vivo.mostrarTarefa = !vivo.mostrarTarefa; $('#vivo-tarefa').classList.toggle('on', vivo.mostrarTarefa); desenharFeed(false) }
   pintarSeguir()

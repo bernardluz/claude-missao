@@ -517,3 +517,32 @@ test('agente "contexto do plano" (áreas) substitui o de skills: plano, features
   assert.deepEqual(m.skills.map(s => s.nome), ['Telas', 'Fim'])
   assert.equal(m.progresso.total, 3)
 })
+
+test('etapas v2: contrato, caça, verificação e user testing ficam com o milestone e não viram feature', () => {
+  const raiz = temp()
+  const areas = { areas: SKILLS.skills }
+  execucao(raiz, 'wf_1', [
+    ['preparo', {}], ['simplicidade', { ok: true, perguntas: [], cortes: [] }], ['planejar', { milestones: [] }],
+    ['pré-voo', { ok: true, faltando: [] }], ['contexto do plano', areas],
+    ['contrato: M1 base', { premissas: [{ premissa: 'p', confere: true }] }], ...f1Feita, ...f2Feita, ['conferência', {}],
+    ['testes: M1 base', ok], ['revisão: M1 base', ok],
+    ['áreas de caça: M1 base', { areas: ['geral'] }],
+    ['caça: geral (M1 base, rodada 1)', { achados: [{ problema: 'b' }] }],
+    ['verificação 1: achado 1 (M1 base, rodada 1)', { confirmado: false, motivo: 'm' }],
+    ['user testing: M1 base', undefined],
+  ])
+  const [m] = missoes(raiz)
+  const m1 = m.milestones[0]
+  assert.deepEqual(m1.features.map(f => f.titulo), ['F1 Admin: base e Contas', 'F2 lista'])
+  assert.deepEqual(m1.validacoes.map(v => [v.label.split(':')[0], v.estado]), [
+    ['contrato', 'aprovado'], ['testes', 'aprovado'], ['revisão', 'aprovado'], ['áreas de caça', 'aprovado'],
+    ['caça', 'reprovado'], ['verificação 1', 'aprovado'], ['user testing', 'rodando'],
+  ])
+  assert.equal(m1.estado, 'validado')
+  assert.equal(m.atual, 'user testing de M1 base')
+  const resumo = label => m.linhaDoTempo.find(c => c.label === label).resumo
+  assert.equal(resumo('pré-voo'), 'ambiente pronto')
+  assert.equal(resumo('simplicidade'), 'SPEC simples')
+  assert.equal(resumo('caça: geral (M1 base, rodada 1)'), '1 achado(s)')
+  assert.equal(resumo('verificação 1: achado 1 (M1 base, rodada 1)'), 'refutado')
+})
