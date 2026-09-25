@@ -284,7 +284,8 @@ const limitesOk = [MAX_RODADAS_CORRECAO, MAX_PROBLEMAS_POR_RODADA, MAX_RODADAS_R
   Number.isInteger(MAX_RETENTATIVAS_INFRA) && MAX_RETENTATIVAS_INFRA >= 0
 // Modo enxugar: cortar um código que já existe. Vem de args.modo, do retomar ou do marcador na SPEC em texto.
 const MARCA_ENXUGAR = '<!-- modo: enxugar -->'
-const modoOk = args?.modo === undefined || args.modo === 'enxugar'
+const modoValido = v => v === undefined || v === null || v === 'enxugar'
+const modoOk = args?.modo !== null && modoValido(args?.modo) && modoValido(args?.retomar?.modo)
 const MODO = args?.modo ?? args?.retomar?.modo ?? (SPEC?.includes(MARCA_ENXUGAR) ? 'enxugar' : null)
 const aceiteOk = args?.aceite === undefined || (Array.isArray(args.aceite) && args.aceite.every(x => typeof x === 'string'))
 if (!args || !limitesOk || !aceiteOk || !modoOk || (!planoDado && !SPEC)) {
@@ -490,6 +491,8 @@ const deForaAceitos = Array.isArray(args.retomar?.deFora) ? args.retomar.deFora.
 let aceite = null
 // Modo enxugar: medição do alvo no início (pré-voo, preservada na retomada) e no fim (aceite).
 let medicaoAntes = retomar?.medicaoAntes ?? null
+// A medição inicial tirada na retomada (ou que faltou) não é o "antes" de verdade: vai marcada como parcial.
+let antesParcial = retomar?.antesParcial === true
 let medicaoDepois = null
 const MEDIR = 'Meça também o alvo desta missão e devolva em medicao: linhas de código (sem testes), tabelas vivas, ' +
   'filas/listeners, arquivos e testes, e em medicao.comandos os comandos que usou.'
@@ -502,7 +505,7 @@ const preVoo = await comRetentativa('pré-voo', () => trabalhar(montar('pre-voo'
   `.\nNão altere código nem arquivos versionados. ${SAIDA_EM_ARQUIVO}\n` +
   'Devolva ok=true só se tudo o que a missão vai usar funciona; senão, em faltando, cada item que falta, com como ' +
   `conferir e como resolver.${MODO === 'enxugar' && !medicaoAntes ? `\n${MEDIR}` : ''}\n${GIT_PROIBIDO}\n\n${planoTexto}`),
-  { label: 'pré-voo', phase: 'Pré-voo', schema: PRE_VOO },
+  { label: 'pré-voo', phase: 'Pré-voo', schema: MODO === 'enxugar' && !medicaoAntes ? { ...PRE_VOO, required: [...PRE_VOO.required, 'medicao'] } : PRE_VOO },
 ))
 if (!preVoo || !preVoo.ok) {
   const motivo = preVoo
@@ -513,7 +516,11 @@ if (!preVoo || !preVoo.ok) {
   return { parouEm: 'pré-voo', motivo, faltando: preVoo?.faltando ?? [], plano: { milestones }, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), retomar: r }
 }
 
-if (MODO === 'enxugar' && !medicaoAntes) medicaoAntes = preVoo.medicao ?? null
+if (MODO === 'enxugar' && !medicaoAntes) {
+  medicaoAntes = preVoo.medicao ?? null
+  antesParcial = !!retomar || !medicaoAntes
+  if (antesParcial) log('modo enxugar: medição inicial ausente ou tirada na retomada; o antes x depois sai marcado como parcial')
+}
 
 // Hidratação, como a Factory: o contexto do plano (guias por área, montados a partir do código atual) é gerado UMA vez
 // por missão e volta no `retomar`; a retomada o reaproveita, junto com os aprendizados, em vez de regenerá-lo.
@@ -1164,7 +1171,7 @@ function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   return {
     parouEm: m.titulo, ...extra, plano: { milestones }, contexto, aprendizados: contexto.aprendizados,
     sugestaoAprendizados: sugestaoAprendizados(),
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1355,5 +1362,5 @@ for (const [i, m] of pendentes.entries()) {
   relatorio.push({ milestone: m.titulo, aprovado: true, rodadasCorrecao: rodada, commits: `${base}..${head}`, features: feitas })
 }
 
-const enxugar = MODO === 'enxugar' ? { modo: MODO, medicao: { antes: medicaoAntes, depois: medicaoDepois } } : {}
+const enxugar = MODO === 'enxugar' ? { modo: MODO, medicao: { antes: medicaoAntes, depois: medicaoDepois, ...(antesParcial ? { antesParcial: true } : {}) } } : {}
 return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, ...enxugar, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }

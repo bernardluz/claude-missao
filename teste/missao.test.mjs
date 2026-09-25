@@ -1186,3 +1186,35 @@ describe('modo enxugar: correção não restaura o que saiu', () => {
     assert.match(normal.prompt('correção 1.1 (M1)'), /Corrija a causa: não desative, pule nem enfraqueça testes/)
   })
 })
+
+describe('modo enxugar: medição inicial e validação do modo', () => {
+  test('o schema do pré-voo exige medicao só no modo enxugar', async () => {
+    const enx = await rodarCom({}, { spec: 's.md', modo: 'enxugar' })
+    assert.ok(enx.chamadas.find(c => c.label === 'pré-voo').schema.required.includes('medicao'))
+    const normal = await rodar(plano())
+    assert.ok(!normal.chamadas.find(c => c.label === 'pré-voo').schema.required.includes('medicao'))
+  })
+
+  test('sem medição no pré-voo, o antes x depois sai marcado como parcial', async () => {
+    const r = await rodarCom({}, { spec: 's.md', modo: 'enxugar' }, { semMedicao: true })
+    assert.equal(r.resultado.concluido, true)
+    assert.deepEqual(r.resultado.medicao, { antes: null, depois: MEDICAO_DEPOIS, antesParcial: true })
+  })
+
+  test('medição inicial tirada na retomada vai marcada como parcial', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodarCom({}, plano({ modo: 'enxugar' }), { semMedicao: true, suite: [2, 2] }, estado)
+    assert.equal(p1.resultado.retomar.antesParcial, true)
+    const r = { ...p1.resultado.retomar, medicaoAntes: null, antesParcial: false }
+    const p2 = await rodarCom({}, plano({ retomar: r }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.deepEqual(p2.resultado.medicao, { antes: MEDICAO_ANTES, depois: MEDICAO_DEPOIS, antesParcial: true })
+  })
+
+  test('retomar.modo inválido é recusado como args.modo', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { validacao: [2, 2] }, estado)
+    await assert.rejects(rodar(plano({ retomar: { ...p1.resultado.retomar, modo: 'outro' } }), {}, estado), /args inválido/)
+    await assert.rejects(rodar(plano({ modo: null })), /args inválido/)
+  })
+})

@@ -50,6 +50,7 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   cacaRepeteItem     número do item da lista de corrigidos que o caçador aponta (padrão 1; null para não apontar)
 //   refuta             o segundo verificador refuta todos os achados
 //   userTesting        { [milestone]: [n falhas por rodada] } resultado do user testing
+//   semMedicao         o pré-voo não devolve a medição mesmo quando o prompt a pede
 //   foraImpacta     resposta do agente que julga commit de fora (padrão true: para como antes)
 //   conferenciaErro    texto de erro que o agente de conferência sempre devolve (ex.: erro do git)
 //   conferenciaResumida vezes que a conferência devolve só o último commit, com a contagem real
@@ -91,7 +92,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   const pendencias = () => [...(estado.sujo ? [' M x/a.js'] : []), ...estado.dumps.map(d => `?? ${d}`)]
 
   const responder = async (prompt, opt) => {
-    chamadas.push({ label: opt.label, phase: opt.phase, agentType: opt.agentType, model: opt.model, effort: opt.effort, prompt })
+    chamadas.push({ label: opt.label, phase: opt.phase, agentType: opt.agentType, model: opt.model, effort: opt.effort, schema: opt.schema, prompt })
     const l = opt.label
     if (quedas[l] > 0) {
       quedas[l]--
@@ -107,7 +108,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (l === 'planejar') return { milestones: o.planoGerado ?? plano().milestones }
     // Quando o prompt pede a medição (modo enxugar), o pré-voo mede o antes e o aceite, o depois.
     const pedeMedicao = /devolva em medicao/.test(prompt)
-    if (l === 'pré-voo') return { ok: !o.preVooFalta, faltando: o.preVooFalta ?? [], ...(pedeMedicao ? { medicao: MEDICAO_ANTES } : {}) }
+    if (l === 'pré-voo') return { ok: !o.preVooFalta, faltando: o.preVooFalta ?? [], ...(pedeMedicao && !o.semMedicao ? { medicao: MEDICAO_ANTES } : {}) }
     if (l === 'preparo' || l === 'conferência') {
       if (o.conferenciaErro) return { saida: o.conferenciaErro }
       if (invalida > 0) { invalida--; return { saida: 'o repositório tem 3 commits novos e está limpo' } }
