@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { gerar, instalar, chavesAceitas, NUCLEO, SKILL } from '../instalar.mjs'
+import { gerar, instalar, chavesAceitas, lerEtapas, NUCLEO, SKILL, ETAPAS_DIR } from '../instalar.mjs'
 import { executar, plano } from './simulador.mjs'
 
 const nucleo = readFileSync(NUCLEO, 'utf8')
@@ -142,4 +142,35 @@ test('instala o git-estado.mjs, que imprime o JSON que a conferência interpreta
   writeFileSync(join(raiz, '.claude', 'missao', 'git-estado.mjs'), 'manual\n')
   assert.equal(instalar(raiz, { verificar: true }).atualizado, false)
   assert.throws(() => instalar(raiz), /git-estado\.mjs não foi gerado pelo instalador/)
+})
+
+test('embute a técnica de cada etapa; o projeto complementa ou substitui, e etapa desconhecida é recusada', () => {
+  const raiz = projetoTemporario()
+  const dir = join(raiz, '.claude', 'missao', 'etapas')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'implementar.md'), 'Use o Maven wrapper.\n')
+  writeFileSync(join(dir, 'aceite.md'), '<!-- substitui -->\nSó o do projeto.\n')
+  const etapas = lerEtapas(raiz)
+  assert.deepEqual(Object.keys(etapas), ['aceite', 'caca-bug', 'corrigir', 'implementar', 'planejar', 'pre-voo',
+    'prova-de-contrato', 'revisar', 'scrutiny', 'user-testing', 'verificar-simplicidade'])
+  const nucleoImplementar = readFileSync(join(ETAPAS_DIR, 'implementar.md'), 'utf8').replace(/\r\n/g, '\n').trim()
+  assert.equal(etapas.implementar, `${nucleoImplementar}\n\nDo projeto:\nUse o Maven wrapper.`)
+  assert.equal(etapas.aceite, 'Só o do projeto.')
+  const { destino } = instalar(raiz)
+  const instalado = readFileSync(destino, 'utf8')
+  assert.match(instalado, /const ETAPAS = \{\n {2}"aceite": "Só o do projeto\.",/)
+  assert.ok(instalado.includes(JSON.stringify(etapas.implementar)))
+  assert.equal(instalar(raiz, { verificar: true }).atualizado, true)
+  writeFileSync(join(dir, 'implementar.md'), 'Outra regra.\n')
+  assert.equal(instalar(raiz, { verificar: true }).atualizado, false)
+  writeFileSync(join(dir, 'deploy.md'), 'x')
+  assert.throws(() => instalar(raiz), /etapa desconhecida: .*deploy\.md/)
+})
+
+test('instala a skill criar-spec-simples', () => {
+  const raiz = projetoTemporario()
+  instalar(raiz)
+  const skill = readFileSync(join(raiz, '.claude', 'skills', 'criar-spec-simples', 'SKILL.md'), 'utf8')
+  assert.match(skill, /^---\nname: criar-spec-simples\n/)
+  assert.match(skill, /Instalada pelo `claude-missao`/)
 })

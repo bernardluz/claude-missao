@@ -38,7 +38,9 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   ignoraDump         { [feature]: vezes } o agente de commit lista o dump como fora da lista em vez de apagá-lo
 //   apagaAlem          { [feature]: [caminhos] } o agente de commit apaga e informa também o que não é dump
 //   arquivosDeFora     arquivos dos commits que não são da missão (padrão ['z/fora.js'])
-//   foraImpacta        resposta do agente que julga commit de fora (padrão true: para como antes)
+//   areas              áreas que o agente do contexto do plano devolve
+//   aprendizados       { [label]: [textos] } aprendizados que esse agente devolve
+//   foraImpacta       resposta do agente que julga commit de fora (padrão true: para como antes)
 //   conferenciaInvalida vezes que o agente de conferência devolve texto em vez da saída do git-estado.mjs
 export const DUMP = 'bash.exe.stackdump'
 export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0000'], sujo: false }) {
@@ -80,7 +82,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       return null
     }
     if (l === 'commit de fora') return { impacta: o.foraImpacta ?? true, motivo: 'julgado pelo agente' }
-    if (l === 'skills da missão') return { skills: o.skills ?? [] }
+    if (l === 'contexto do plano') return { areas: o.areas ?? [] }
     if (l === 'preparo' || l === 'conferência') {
       if (invalida > 0) { invalida--; return { saida: 'o repositório tem 3 commits novos e está limpo' } }
       // Como o git-estado.mjs: `HEAD` como base dá intervalo vazio.
@@ -145,6 +147,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   const agent = async (prompt, opt) => {
     const r = await responder(prompt, opt)
     const l = opt.label
+    if (r && o.aprendizados?.[l]) r.aprendizados = o.aprendizados[l]
     if (r && deFora[l]) { estado.git.push(deFora[l]); delete deFora[l] }
     if (r && deForaTudo[l]) { estado.git.push(deForaTudo[l]); estado.sujo = false; delete deForaTudo[l] }
     if (r && suja[l] > 0) { suja[l]--; estado.sujo = true }

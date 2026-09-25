@@ -35,7 +35,7 @@ function execucao(raiz, runId, chamadas, { sessao = 's1', cwd = 'C:/repo/proj', 
     const t1 = new Date(Date.UTC(2026, 8, 23, 1, inicioMin + i, 30)).toISOString()
     arquivos.push(`agent-${agentId}.jsonl`)
     writeFileSync(join(dir, `agent-${agentId}.jsonl`), [
-      { type: 'user', timestamp: t0, cwd, message: { content: label === 'skills da missão' ? plano : `tarefa ${label}` } },
+      { type: 'user', timestamp: t0, cwd, message: { content: ['skills da missão', 'contexto do plano'].includes(label) ? plano : `tarefa ${label}` } },
       { type: 'assistant', timestamp: t1, message: { id: `m${i}`, usage: { input_tokens: 10, output_tokens: 5 } } },
     ].map(o => JSON.stringify(o)).join('\n') + '\n')
     if (resultado === CAIU) linhas.push({ type: 'failed', key, agentId })
@@ -506,4 +506,14 @@ test('preparo lido pelo git-estado.mjs: branch e base vêm do JSON da saída', (
   assert.equal(m.branch, 'develop')
   assert.equal(m.base, 'base0009')
   assert.match(m.linhaDoTempo.at(-1).resumo, /^árvore limpa em base0009/)
+})
+
+test('agente "contexto do plano" (áreas) substitui o de skills: plano, features e áreas aparecem', () => {
+  const raiz = temp()
+  const areas = { areas: SKILLS.skills }
+  execucao(raiz, 'wf_1', [['preparo', {}], ['contexto do plano', areas], ...f1Feita, ['F2 lista', undefined]])
+  const [m] = missoes(raiz)
+  assert.deepEqual(m.milestones[0].features.map(f => f.titulo), ['F1 Admin: base e Contas', 'F2 lista'])
+  assert.deepEqual(m.skills.map(s => s.nome), ['Telas', 'Fim'])
+  assert.equal(m.progresso.total, 3)
 })

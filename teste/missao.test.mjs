@@ -427,11 +427,11 @@ describe('suíte completa final', () => {
     assert.equal(r.contar('correção'), 0)
   })
 
-  test('retomar só a suíte não chama o agente de skills', async () => {
+  test('retomar só a suíte não chama o agente do contexto do plano', async () => {
     const estado = { git: ['base0000'], sujo: false }
     const p1 = await rodar(plano(), { suite: [2, 2] }, estado)
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
-    assert.equal(p2.contar('skills da missão'), 0)
+    assert.equal(p2.contar('contexto do plano'), 0)
     assert.equal(p2.resultado.concluido, true)
   })
 
@@ -578,7 +578,7 @@ describe('configuração do projeto', () => {
     assert.equal(r.tipo('revisão: F1'), 'reviewer')
     assert.equal(r.tipo('revisão: M1'), 'reviewer')
     assert.equal(r.tipo('conferência'), 'explorer')
-    assert.equal(r.tipo('skills da missão'), 'explorer')
+    assert.equal(r.tipo('contexto do plano'), 'explorer')
     assert.match(r.prompt('F1'), /Siga docs\/testes\.md/)
     assert.match(r.prompt('F1'), /exigida pelo AGENTS\.md/)
     assert.match(r.prompt('commit: F1'), /PROJ_SKIP_\*/)
@@ -616,5 +616,53 @@ describe('configuração do projeto', () => {
     const r = await rodarCom(CONFIG_EXEMPLO, plano({ config: { formatoCommit: 'feat(x): y', idioma: 'en' } }))
     assert.match(r.prompt('commit: F1'), /mensagem feat\(x\): y em en/)
     assert.match(r.prompt('commit: F1'), /PROJ_SKIP_\*/)
+  })
+})
+
+describe('etapas, contexto do plano e aprendizados', () => {
+  const AREAS = [{ nome: 'Área X', guia: 'copie x/modelo.js', features: ['F1', 'F2', 'F3'] }]
+
+  test('cada prompt de etapa traz a técnica da etapa embutida na instalação e o contexto da área', async () => {
+    const r = await rodarCom({}, plano(), { areas: AREAS, validacao: [1, 0], revisaoFeature: { F1: [1, 0] } })
+    assert.equal(r.resultado.concluido, true)
+    const etapa = nome => readFileSync(new URL(`../etapas/${nome}.md`, import.meta.url), 'utf8').split('\n')[0]
+    for (const [label, nome] of [['F1', 'implementar'], ['F1 · ajuste 1', 'implementar'], ['revisão: F1', 'revisar'],
+      ['revisão: M1', 'scrutiny'], ['testes: M1', 'scrutiny'], ['correção 1.1 (M1)', 'corrigir'], ['suíte completa', 'scrutiny']]) {
+      assert.ok(r.prompt(label).includes(`Técnica da etapa ${nome}`), label)
+      assert.ok(r.prompt(label).includes(etapa(nome)), label)
+      assert.match(r.prompt(label), /### Área X\ncopie x\/modelo\.js/, label)
+    }
+    assert.doesNotMatch(r.prompt('commit: F1'), /Técnica da etapa/)
+  })
+
+  test('núcleo sem instalação não tem técnica embutida, mas segue funcionando', async () => {
+    const r = await rodar(plano())
+    assert.doesNotMatch(r.prompt('F1'), /Técnica da etapa/)
+  })
+
+  test('contexto do plano é gerado uma vez e volta no resultado e no retomar; a retomada o reaproveita', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { areas: AREAS, validacao: [2, 2] }, estado)
+    assert.equal(p1.contar('contexto do plano'), 1)
+    assert.deepEqual(p1.resultado.contexto.areas, AREAS)
+    assert.deepEqual(p1.resultado.retomar.contexto.areas, AREAS)
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('contexto do plano'), 0)
+    assert.match(p2.prompt('F3'), /### Área X/)
+  })
+
+  test('aprendizados dos workers vão para os próximos prompts, para o retomar e para o resultado', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const aprendizados = { F1: ['rode com forks=1'], 'revisão: F2': ['o Banking devolve 404 sem acesso', 'rode com forks=1'] }
+    const p1 = await rodar(plano(), { aprendizados, validacao: [0, 2, 2] }, estado)
+    assert.doesNotMatch(p1.prompt('F1'), /Aprendizados desta missão/)
+    assert.match(p1.prompt('F2'), /Aprendizados desta missão:\n- rode com forks=1/)
+    assert.match(p1.prompt('F1'), /devolva-o em aprendizados/)
+    assert.deepEqual(p1.resultado.aprendizados, ['rode com forks=1', 'o Banking devolve 404 sem acesso'])
+    assert.deepEqual(p1.resultado.retomar.contexto.aprendizados, p1.resultado.aprendizados)
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.match(p2.prompt('revisão: M2'), /- o Banking devolve 404 sem acesso/)
+    assert.deepEqual(p2.resultado.aprendizados, p1.resultado.aprendizados)
   })
 })

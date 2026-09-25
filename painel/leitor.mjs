@@ -240,7 +240,7 @@ function classificar(label) {
   const correcao = label.match(/^correção (\d+)\.(\d+) \((.*)\)$/)
   if (correcao) return { tipo: 'trabalho', alvo: label, correcao: { rodada: Number(correcao[1]), milestone: correcao[3] } }
   if (label === 'suíte completa') return { tipo: 'suite', alvo: SUITE }
-  if (['preparo', 'skills da missão', 'conferência'].includes(label)) return { tipo: label, alvo: null }
+  if (['preparo', 'skills da missão', 'contexto do plano', 'conferência'].includes(label)) return { tipo: label, alvo: null }
   return { tipo: 'trabalho', alvo: label }
 }
 
@@ -260,7 +260,7 @@ export function lerExecucao(dir) {
   if (!journal) return null
   const labels = new Set(journal.chamadas.map(c => c.label))
   // Retomada direto na suíte final não tem agente de skills (não há feature a guiar).
-  if (!labels.has('preparo') || !(labels.has('skills da missão') || labels.has('suíte completa'))) return null
+  if (!labels.has('preparo') || !['skills da missão', 'contexto do plano', 'suíte completa'].some(l => labels.has(l))) return null
   let ultimaAtividade = journal.mtime
   let inicio = null
   let cwd = null
@@ -274,8 +274,9 @@ export function lerExecucao(dir) {
     const duracaoMs = agente?.inicio && agente?.fim ? Date.parse(agente.fim) - Date.parse(agente.inicio) : 0
     return { ...c, ordem, ...classificar(c.label), inicio: agente?.inicio ?? null, duracaoMs, tokens: tokensDe(agente), modelo: agente?.modelo ?? null, effort: agente?.effort ?? null, agente }
   })
-  const skillsChamada = chamadas.find(c => c.label === 'skills da missão')
-  const skills = Array.isArray(skillsChamada?.resultado?.skills) ? skillsChamada.resultado.skills : []
+  // O agente "skills da missão" virou "contexto do plano" (áreas em vez de skills); as missões antigas seguem legíveis.
+  const skillsChamada = chamadas.find(c => c.label === 'skills da missão' || c.label === 'contexto do plano')
+  const skills = [skillsChamada?.resultado?.skills, skillsChamada?.resultado?.areas].find(Array.isArray) ?? []
   const daSkill = skills.flatMap(s => (Array.isArray(s.features) ? s.features : []))
   const exatos = new Set(daSkill)
   for (const c of chamadas) if (c.tipo === 'trabalho' && !c.correcao) exatos.add(c.alvo)
@@ -539,6 +540,7 @@ function resumoDe(c) {
   if ('aprovado' in r) return r.aprovado ? 'aprovado' : `${Array.isArray(r.problemas) ? r.problemas.length : 0} apontamento(s)`
   if ('concluida' in r) return r.concluida ? 'concluída' : 'não concluída'
   if (Array.isArray(r.skills)) return `${r.skills.length} skills`
+  if (Array.isArray(r.areas)) return `${r.areas.length} áreas`
   if (typeof r.saida === 'string') {
     const g = estadoGit(r)
     return g ? (g.limpo ? `árvore limpa em ${String(g.head ?? '').slice(0, 9)}` : 'árvore suja') : 'saída inválida'

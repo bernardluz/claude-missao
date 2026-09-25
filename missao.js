@@ -4,7 +4,7 @@ export const meta = {
   whenToUse: 'Trabalho grande já planejado em milestones e features (estilo Factory Missions). Passe o plano em args; para retomar, passe em args.retomar o objeto devolvido na parada. Agente pulado é retentado: use maxRetentativasInfra 0 para evitar.',
   phases: [
     { title: 'Preparar', detail: 'confere árvore limpa, branch e HEAD base' },
-    { title: 'Skills', detail: 'guias da missão por tipo de feature, só nesta execução' },
+    { title: 'Contexto', detail: 'contexto do plano por área, gerado uma vez e reaproveitado na retomada' },
     { title: 'Implementar', detail: 'por feature, em série: implementa, revisão independente, commit' },
     { title: 'Validar', detail: 'confere commits, revisão + testes sobre o milestone' },
     { title: 'Corrigir', detail: 'um item por problema apontado, com revisão e commit próprios' },
@@ -22,7 +22,8 @@ export const meta = {
 // correção, em loop até aprovar ou parar de progredir. Depois do último milestone,
 // a suíte completa do que a missão tocou, e de quem depende disso, roda uma vez e entra no mesmo loop de correção.
 // Correções seguem enquanto a validação aponta menos problemas que na rodada anterior; o teto só evita loop infinito.
-// Skills da missão vivem só nesta execução: vão no prompt dos workers e no retorno, nunca em .claude/skills/.
+// Prompt de etapa = técnica da etapa (etapas/<etapa>.md, embutida na instalação) + contexto do plano + aprendizados.
+// O contexto do plano é gerado uma vez por missão e volta no retomar; os aprendizados dos workers se acumulam nele.
 // Milestones pequenos: validar cedo evita o acúmulo de erros de um milestone gigante validado só no fim.
 // Agente que não retorna (modelo/API caiu) é retentado; worker só é retentado se não deixou rastro no repositório.
 // Retomada em outra sessão: passe em args.retomar o objeto `retomar` devolvido quando a execução parou.
@@ -39,14 +40,14 @@ const PADRAO = {
   revisor: null,
   // Revisor específico quando TODOS os arquivos estão sob o prefixo. Ex.: [{ prefixo: 'services/', agentType: 'kotlin-reviewer' }]
   revisoresPorPasta: [],
-  // agentType read-only para skills e conferência do git (ex.: 'explorer'). null: agente padrão.
+  // agentType read-only para o contexto do plano e a conferência do git (ex.: 'explorer'). null: agente padrão.
   leitor: null,
   // Proibições extras além das de git. Ex.: ['variáveis MEUPROJETO_SKIP_*']
   proibicoesExtras: [],
   // Formato e idioma da mensagem de commit.
   formatoCommit: '`<tipo>: <descrição>`',
   idioma: 'pt-BR',
-  // Exemplos de tipos de trabalho para o agente que monta as skills da missão.
+  // Exemplos de áreas de trabalho para o agente que monta o contexto do plano.
   exemplosSkills: 'migration + entidade, endpoint com teste de integração, tela',
   // Como rodar, ao fim da missão, a suíte completa do que a missão tocou e de quem depende disso (comando ou
   // instrução; {inicio} vira o commit onde a missão começou). null: o agente descobre módulos tocados e dependentes.
@@ -59,6 +60,11 @@ const PADRAO = {
 // @config-inicio (substituído por instalar.mjs)
 const CONFIG_PROJETO = {}
 // @config-fim
+// Técnica curta de cada etapa, embutida por instalar.mjs a partir de etapas/<etapa>.md e do complemento do projeto em
+// .claude/missao/etapas/: o script do Workflow não lê arquivos. No núcleo cru fica vazio.
+// @etapas-inicio (substituído por instalar.mjs)
+const ETAPAS = {}
+// @etapas-fim
 const AJUSTAVEIS_POR_EXECUCAO = ['formatoCommit', 'idioma', 'exemplosSkills']
 {
   const negadas = Object.keys(args?.config ?? {}).filter(k => !AJUSTAVEIS_POR_EXECUCAO.includes(k))
@@ -130,6 +136,7 @@ const RESULTADO_FEATURE = {
     jaResolvido: { type: 'boolean' },
     arquivos: { type: 'array', items: { type: 'string' } },
     resumo: { type: 'string' },
+    aprendizados: { type: 'array', items: { type: 'string' } },
     testesRodados: { type: 'array', items: { type: 'string' } },
   },
   required: ['concluida', 'resumo'],
@@ -154,10 +161,13 @@ const GIT_ESTADO = '.claude/missao/git-estado.mjs'
 // O agente de conferência só devolve a saída literal do script de estado do git; quem a interpreta é o workflow.
 const SAIDA = { type: 'object', properties: { saida: { type: 'string' } }, required: ['saida'] }
 
-const SKILLS = {
+// Todo worker pode devolver fatos não óbvios que descobriu; eles se acumulam no contexto da missão.
+const APRENDIZADOS = { type: 'array', items: { type: 'string' } }
+
+const CONTEXTO = {
   type: 'object',
   properties: {
-    skills: {
+    areas: {
       type: 'array',
       items: {
         type: 'object',
@@ -170,12 +180,13 @@ const SKILLS = {
       },
     },
   },
-  required: ['skills'],
+  required: ['areas'],
 }
 
 const VALIDACAO = {
   type: 'object',
   properties: {
+    aprendizados: APRENDIZADOS,
     aprovado: { type: 'boolean' },
     problemas: {
       type: 'array',
@@ -269,32 +280,57 @@ if (retomar && !retomar.inicioMissao) {
   log(`retomar sem inicioMissao: a suíte final vai cobrir só a partir de ${retomar.base}, não a missão inteira`)
 }
 
-// Como a Factory: antes de começar, guias específicos por tipo de feature, montados a partir do código atual.
-phase('Skills')
-const plano = pendentes.filter(m => !m.suite).map(m =>
+// Hidratação, como a Factory: o contexto do plano (guias por área, montados a partir do código atual) é gerado UMA vez
+// por missão e volta no `retomar`; a retomada o reaproveita, junto com os aprendizados, em vez de regenerá-lo.
+phase('Contexto')
+const planoTexto = pendentes.filter(m => !m.suite).map(m =>
   `## ${m.titulo} (critério: ${m.criterio})\n` + m.features.map(f => `- ${f.titulo}: ${f.spec}`).join('\n'),
 ).join('\n\n')
-// Retomando só a suíte final não há feature a guiar: pula o agente de skills.
-const geradas = !plano ? null : await comRetentativa('skills da missão', () => agent(
-  'Você prepara as skills desta missão. Leia o plano abaixo e o código que ele toca. Agrupe as features por tipo ' +
-  `de trabalho (ex.: ${CONFIG.exemplosSkills}) e escreva um guia curto ` +
-  'por tipo: arquivos-modelo do repo para copiar o padrão, onde cada peça mora, comando do teste focado e armadilhas ' +
-  'já visíveis no código. Cite regras e skills existentes do projeto pelo caminho em vez de copiá-las. ' +
-  'Cada feature do plano entra em exatamente uma skill, pelo título exato. Não escreva arquivos nem rode build ' +
-  'ou testes: só leitura. ' + GIT_PROIBIDO + '\n\n' + plano,
-  { label: 'skills da missão', phase: 'Skills', agentType: comoAgente(CONFIG.leitor), schema: SKILLS },
-))
-const skills = geradas?.skills ?? []
+const contexto = await (async () => {
+  const lista = v => (Array.isArray(v) ? v : [])
+  if (retomar?.contexto) {
+    log('Contexto do plano reaproveitado da execução anterior')
+    return { areas: lista(retomar.contexto.areas), aprendizados: lista(retomar.contexto.aprendizados).filter(a => typeof a === 'string') }
+  }
+  // Retomando só a suíte final, sem contexto anterior, não há feature a guiar.
+  const gerado = !planoTexto ? null : await comRetentativa('contexto do plano', () => agent(
+    'Você prepara o contexto do plano desta missão. Leia o plano abaixo e o código que ele toca. Agrupe as features ' +
+    `por área de trabalho (ex.: ${CONFIG.exemplosSkills}) e escreva um guia curto por área: arquivos-modelo do repo ` +
+    'para copiar o padrão, onde cada peça mora, comando do teste focado e armadilhas já visíveis no código. Cite ' +
+    'regras e skills existentes do projeto pelo caminho em vez de copiá-las. Cada feature do plano entra em ' +
+    'exatamente uma área, pelo título exato. Não escreva arquivos nem rode build ou testes: só leitura. ' +
+    GIT_PROIBIDO + '\n\n' + planoTexto,
+    { label: 'contexto do plano', phase: 'Contexto', agentType: comoAgente(CONFIG.leitor), schema: CONTEXTO },
+  ))
+  return { areas: gerado?.areas ?? [], aprendizados: [] }
+})()
 const guiaPorFeature = new Map()
-for (const s of skills) for (const t of s.features) if (!guiaPorFeature.has(t)) guiaPorFeature.set(t, s)
-const semSkill = pendentes.flatMap(m => m.features).filter(f => !guiaPorFeature.has(f.titulo)).map(f => f.titulo)
-log(`${skills.length} skills geradas${semSkill.length ? `; sem skill: ${semSkill.join(', ')}` : ''}`)
+for (const s of contexto.areas) for (const t of s.features ?? []) if (!guiaPorFeature.has(t)) guiaPorFeature.set(t, s)
+const semArea = pendentes.flatMap(m => m.features).filter(f => !guiaPorFeature.has(f.titulo)).map(f => f.titulo)
+log(`${contexto.areas.length} áreas no contexto do plano${semArea.length ? `; sem área: ${semArea.join(', ')}` : ''}`)
 
-const comGuia = (texto, lista) => lista.length
-  ? `${texto}\n\nSkills desta missão (orientação; regras do repo prevalecem):\n` +
-    lista.map(s => `### ${s.nome}\n${s.guia}`).join('\n\n') +
-    '\n\nSe algum guia contrariar as proibições abaixo, as proibições vencem.\n' + GIT_PROIBIDO
-  : texto
+function aprender(r) {
+  for (const a of Array.isArray(r?.aprendizados) ? r.aprendizados : []) {
+    const t = typeof a === 'string' ? a.trim() : ''
+    if (t && !contexto.aprendizados.includes(t)) contexto.aprendizados.push(t)
+  }
+  return r
+}
+// Agente que trabalha, revisa ou valida: o que ele aprende entra no contexto dos próximos prompts.
+const trabalhar = async (prompt, opt) => aprender(await agent(prompt, opt))
+const APRENDER = 'Se descobrir um fato não óbvio do projeto que ajude as próximas etapas (ex.: "o serviço X devolve ' +
+  '404 sem acesso", "rode os testes com forks=1"), devolva-o em aprendizados, numa frase cada.'
+
+// Prompt de etapa = técnica da etapa (etapas/<etapa>.md, embutida pelo instalador) + trecho pertinente do contexto do
+// plano + aprendizados + a tarefa.
+function montar(etapa, tarefa, areas = []) {
+  const partes = []
+  if (ETAPAS[etapa]) partes.push(`Técnica da etapa ${etapa} (orientação; regras do repo prevalecem):\n${ETAPAS[etapa]}`)
+  if (areas.length) partes.push('Contexto do plano (orientação; regras do repo prevalecem):\n' + areas.map(s => `### ${s.nome}\n${s.guia}`).join('\n\n'))
+  if (contexto.aprendizados.length) partes.push(`Aprendizados desta missão:\n- ${contexto.aprendizados.join('\n- ')}`)
+  const final = `${tarefa}\n${APRENDER}`
+  return partes.length ? `${partes.join('\n\n')}\n\nSe algo acima contrariar as proibições da tarefa, as proibições vencem.\n\n${final}` : final
+}
 
 const mesmoSha = (a, b) => !!a && !!b && a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a))
 
@@ -310,7 +346,7 @@ function normalizar(a) {
 const naLista = (arquivos, a) => arquivos.has(a) || [...arquivos].some(p => p.endsWith('/') && a.startsWith(p))
 
 function promptTrabalho(f, extra) {
-  return comGuia(
+  return montar(f.etapa ?? 'implementar',
     `Implemente a feature "${f.titulo}".\nSpec: ${f.spec}\n${extra}\n` +
     `${TESTES}, e revise o próprio diff.\n` + SAIDA_EM_ARQUIVO + '\n' +
     'NÃO faça commit nem stage: a revisão independente' +
@@ -492,7 +528,7 @@ async function implementar(features, fase) {
       'e ajuste retomar.head, retomar.commits e retomar.concluidas.'
     // Worker que caiu: repete se não houve commit nem troca de branch. Se deixou diff parcial, o próximo continua dele.
     let parcial = false
-    const r = await comRetentativa(f.titulo, () => agent(promptTrabalho(f, parcial
+    const r = await comRetentativa(f.titulo, () => trabalhar(promptTrabalho(f, parcial
       ? '\nUma tentativa anterior caiu no meio: o diff não commitado atual é trabalho parcial desta feature. Continue a ' +
         'partir dele e declare em `arquivos` também os caminhos que ela já tinha alterado (veja `git status`).'
       : ''),
@@ -536,12 +572,12 @@ async function implementar(features, fase) {
       const memoria = anteriores.length
         ? `\nNa rodada anterior foram apontados: ${anteriores.join(' | ')}. Confirme se foram resolvidos.`
         : ''
-      const rev = await comRetentativa(`revisão: ${f.titulo}`, () => agent(
+      const rev = await comRetentativa(`revisão: ${f.titulo}`, () => trabalhar(montar('revisar',
         `Revisão independente, antes do commit, da feature "${f.titulo}". Spec: ${f.spec}\n` +
         'Todo o diff ainda não commitado é desta feature: veja `git status`, `git diff HEAD` (inclui o que estiver em ' +
         `stage) e os arquivos novos. Arquivo ${DUMP_DO_BASH}: ignore-o. ` +
         'Aponte só problemas bloqueantes de correção, segurança, contrato ou testes faltantes.' +
-        memoria + '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO,
+        memoria + '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, f.guias ?? []),
         { label: `revisão: ${f.titulo}`, phase: fase, agentType: revisorPara([...arquivos]), schema: VALIDACAO },
       ))
       if (!rev) return falhou('revisor da feature não respondeu.' + sujo)
@@ -560,7 +596,7 @@ async function implementar(features, fase) {
         return falhou(`revisão da feature não fechou após ${MAX_RODADAS_REVISAO} rodadas de ajuste: ${problemas.join(' | ')}.${sujo}`)
       }
       log(`${f.titulo}: ${problemas.length} apontamentos antes do commit → ajuste ${rodada}`)
-      const ajuste = await comRetentativa(`${f.titulo} · ajuste ${rodada}`, () => agent(promptTrabalho(f,
+      const ajuste = await comRetentativa(`${f.titulo} · ajuste ${rodada}`, () => trabalhar(promptTrabalho(f,
         `\nO diff atual, ainda não commitado, já implementa esta feature. Ajuste-o conforme os apontamentos:\n- ` +
         problemas.join('\n- ') +
         '\nSe um gate falhar por causa fora desta feature (ambiente, dívida de outro código), não mexa em arquivos ' +
@@ -649,7 +685,7 @@ async function validarSuite(anteriores) {
     : `Rode a suíte completa do que a missão tocou e de quem depende disso. Veja o que mudou com \`git diff --name-only ${intervalo}\`, ` +
       'identifique os módulos, pacotes ou apps tocados e os que dependem deles, e rode a suíte inteira de cada um ' +
       '(não só testes focados), com os runners já adotados no projeto.'
-  const r = await comRetentativa('suíte completa', () => agent(
+  const r = await comRetentativa('suíte completa', () => trabalhar(montar('scrutiny',
     `${como} Faça isso no HEAD atual, sem alterar código. ${SAIDA_EM_ARQUIVO} ` +
     'Não rode comandos que alterem lockfiles ou dependências versionadas. Confira `git status` antes e depois: ao ' +
     'terminar, desfaça somente o que a própria suíte criou ou alterou (remova arquivos novos gerados por ela e use ' +
@@ -658,7 +694,7 @@ async function validarSuite(anteriores) {
     'Aprove só se tudo passar. Agrupe as falhas por causa provável: um problema por causa, não um por teste, com o ' +
     'arquivo provável e a saída relevante. Se a causa for de ambiente (serviço fora do ar, dependência ou ferramenta ' +
     'ausente, porta ocupada), marque ambiente=true e descreva o que faltou.' + memoria +
-    '\n' + GIT_PROIBIDO,
+    '\n' + GIT_PROIBIDO, contexto.areas),
     { label: 'suíte completa', phase: 'Suíte final', schema: VALIDACAO },
   ))
   if (!r) return { erro: 'o agente da suíte completa não respondeu' }
@@ -681,16 +717,16 @@ async function validar(m, base, arquivos, anteriores) {
       'Confirme se foram resolvidos e só aponte novo problema se for bloqueante real.'
     : ''
   const [revisao, testes] = await parallel([
-    () => comRetentativa(`revisão: ${m.titulo}`, () => agent(
+    () => comRetentativa(`revisão: ${m.titulo}`, () => trabalhar(montar('scrutiny',
       `Revise os commits ${intervalo} do milestone "${m.titulo}" (critério: ${m.criterio}). ` +
       'Aponte só problemas bloqueantes de correção, segurança, contrato ou atomicidade dos commits.' + memoria +
-      '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO,
+      '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
       { label: `revisão: ${m.titulo}`, phase: 'Validar', agentType: revisorPara(arquivos.map(normalizar)), schema: VALIDACAO },
     )),
-    () => comRetentativa(`testes: ${m.titulo}`, () => agent(
+    () => comRetentativa(`testes: ${m.titulo}`, () => trabalhar(montar('scrutiny',
       `Rode, no HEAD atual, os testes focados que cobrem os commits ${intervalo} do milestone "${m.titulo}" ` +
       `e confira o critério: ${m.criterio}. Não altere código. Reporte falhas com a saída relevante.` + memoria +
-      '\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO,
+      '\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
       { label: `testes: ${m.titulo}`, phase: 'Validar', schema: VALIDACAO },
     )),
   ])
@@ -703,13 +739,20 @@ async function validar(m, base, arquivos, anteriores) {
 
 const relatorio = []
 
+// Correção e validação podem tocar qualquer parte do milestone: recebem todas as áreas dele. Na suíte final a falha
+// pode estar em qualquer parte da missão: todas as áreas.
+function guiasDe(m) {
+  if (m.suite) return contexto.areas
+  return [...new Set(m.features.filter(f => guiaPorFeature.has(f.titulo)).map(f => guiaPorFeature.get(f.titulo)))]
+}
+
 // `retomar` vai direto para args.retomar de uma nova execução: recomeça neste milestone, sem refazer o que já foi commitado.
 // head e commits são só os que esta missão declarou; commit órfão de worker que caiu fica de fora de propósito.
 function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
-    parouEm: m.titulo, ...extra, skills,
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas },
+    parouEm: m.titulo, ...extra, contexto, aprendizados: contexto.aprendizados,
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, contexto },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -745,10 +788,7 @@ for (const [i, m] of pendentes.entries()) {
   log(m.suite ? 'Suíte completa do projeto' : `Milestone: ${m.titulo} (${aFazer.length} de ${m.features.length} features a implementar)`)
   const pararAqui = extra => parar(m, base, feitas, commits, extra, jaConcluidas)
   const features = aFazer.map(f => ({ ...f, guias: guiaPorFeature.has(f.titulo) ? [guiaPorFeature.get(f.titulo)] : [] }))
-  // Correção pode tocar qualquer parte do milestone: recebe todas as skills dele.
-  // Na suíte final a falha pode estar em qualquer parte da missão: todas as skills.
-  const guiasDoMilestone = m.suite ? skills
-    : [...new Set(m.features.filter(f => guiaPorFeature.has(f.titulo)).map(f => guiaPorFeature.get(f.titulo)))]
+  const guiasDoMilestone = guiasDe(m)
 
   const impl = await implementar(features, 'Implementar')
   feitas.push(...impl.resultados)
@@ -775,6 +815,7 @@ for (const [i, m] of pendentes.entries()) {
         `Outros problemas da mesma rodada (podem ser duplicados deste ou já corrigidos): ${todos.filter((_, j) => j !== i).join(' | ') || 'nenhum'}.\n` +
         'Corrija a causa: não desative, pule nem enfraqueça testes, e não mexa em limites de cobertura para passar.',
       guias: guiasDoMilestone,
+      etapa: 'corrigir',
     }))
     const fix = await implementar(correcoes, 'Corrigir')
     feitas.push(...fix.resultados)
@@ -806,4 +847,4 @@ for (const [i, m] of pendentes.entries()) {
   relatorio.push({ milestone: m.titulo, aprovado: true, rodadasCorrecao: rodada, commits: `${base}..${head}`, features: feitas })
 }
 
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, skills, relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, contexto, aprendizados: contexto.aprendizados, relatorio }
