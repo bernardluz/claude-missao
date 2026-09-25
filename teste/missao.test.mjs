@@ -912,3 +912,19 @@ describe('revisão: retomada e commits de fora', () => {
     assert.equal(p2.contar('commit de fora'), 1)
   })
 })
+
+describe('revisão: commit de fora aceito fica fora do escopo', () => {
+  test('arquivos do commit de fora não entram no revisor por pasta, nas áreas de caça nem nas correções', async () => {
+    const r = await rodarCom(CONFIG_EXEMPLO, plano(), {
+      arquivos: ['services/a.kt'], commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['web/y.ts'], foraImpacta: false,
+      validacao: [1, 0],
+    })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.tipo('revisão: M1'), 'kotlin-reviewer')
+    assert.doesNotMatch(r.prompt('áreas de caça: M1'), /web\/y\.ts/)
+    assert.match(r.prompt('áreas de caça: M1'), /services\/a\.kt/)
+    for (const label of ['revisão: M1', 'testes: M1', 'correção 1.1 (M1)', 'caça: geral (M1, rodada 1)']) {
+      assert.match(r.prompt(label), /Ignore os commits de fora da missão \(fora0001\)/, label)
+    }
+  })
+})

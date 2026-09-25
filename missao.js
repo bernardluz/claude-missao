@@ -823,8 +823,18 @@ async function conferir(base, esperados, fase = 'Scrutiny') {
   if (!mesmoSha(c.head, head)) return { ok: false, motivo: `HEAD real ${c.head} difere do declarado ${head}` }
   const bate = c.commits.length === esperados.length && c.commits.every((s, i) => mesmoSha(s, esperados[i]))
   if (!bate) return { ok: false, motivo: `commits do intervalo não batem com os declarados (real: ${c.commits.length}, declarados: ${esperados.length}); pode haver commit extra ou de outra sessão` }
-  return { ok: true, arquivos: c.arquivos }
+  return { ok: true, arquivos: arquivosSemDeFora(c) }
 }
+
+// Commit de fora aceito não é trabalho da missão: fica fora do escopo de scrutiny, caça, correção e revisor por pasta.
+const ehDeFora = s => deForaAceitos.some(d => mesmoSha(d, s))
+function arquivosSemDeFora(c) {
+  if (!c.commits.some(ehDeFora) || !c.arquivosPorCommit) return c.arquivos
+  return [...new Set(c.commits.filter(s => !ehDeFora(s)).flatMap(s => c.arquivosPorCommit[s] ?? []))]
+}
+const semDeFora = () => deForaAceitos.length
+  ? ` Ignore os commits de fora da missão (${deForaAceitos.join(', ')}): não são deste trabalho, nem os arquivos que só eles mudaram.`
+  : ''
 
 // Suíte completa do projeto, no HEAD atual, sem alterar código.
 async function validarSuite(anteriores) {
@@ -871,13 +881,13 @@ async function validar(m, base, arquivos, anteriores) {
     : ''
   const [revisao, testes] = await parallel([
     () => comRetentativa(`revisão: ${m.titulo}`, () => trabalhar(montar('scrutiny',
-      `Revise os commits ${intervalo} do milestone "${m.titulo}" (critério: ${m.criterio}). ` +
+      `Revise os commits ${intervalo} do milestone "${m.titulo}" (critério: ${m.criterio}).${semDeFora()} ` +
       'Aponte só problemas bloqueantes de correção, segurança, contrato ou atomicidade dos commits.' + memoria +
       '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
       { label: `revisão: ${m.titulo}`, phase: 'Scrutiny', agentType: revisorPara(arquivos.map(normalizar)), schema: VALIDACAO },
     )),
     () => comRetentativa(`testes: ${m.titulo}`, () => trabalhar(montar('scrutiny',
-      `Rode, no HEAD atual, os testes focados que cobrem os commits ${intervalo} do milestone "${m.titulo}" ` +
+      `Rode, no HEAD atual, os testes focados que cobrem os commits ${intervalo} do milestone "${m.titulo}"${semDeFora()} ` +
       `e confira o critério: ${m.criterio}. Não altere código. Reporte falhas com a saída relevante.` + memoria +
       '\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
       { label: `testes: ${m.titulo}`, phase: 'Scrutiny', schema: VALIDACAO },
@@ -1124,7 +1134,7 @@ for (const [i, m] of pendentes.entries()) {
     const todos = problemas.map(textoDoAchado)
     const correcoes = todos.map((p, i) => ({
       titulo: `correção ${rodada}.${i + 1} (${m.titulo})`,
-      spec: `Corrija: ${p}\n${m.suite ? 'Falha da suíte completa ao fim da missão' : `Milestone "${m.titulo}", critério: ${m.criterio}, commits ${base}..${head}`}.\n` +
+      spec: `Corrija: ${p}\n${m.suite ? 'Falha da suíte completa ao fim da missão' : `Milestone "${m.titulo}", critério: ${m.criterio}, commits ${base}..${head}`}.${semDeFora()}\n` +
         `Outros problemas da mesma rodada (podem ser duplicados deste ou já corrigidos): ${todos.filter((_, j) => j !== i).join(' | ') || 'nenhum'}.\n` +
         'Corrija a causa: não desative, pule nem enfraqueça testes, e não mexa em limites de cobertura para passar.',
       guias: guiasDoMilestone,
@@ -1177,7 +1187,7 @@ for (const [i, m] of pendentes.entries()) {
   if (m.suite && !retomando && milestones.length > 1) {
     const c = await cacar('final, rodada 1', ['interação entre milestones'], `${INICIO_MISSAO}..${head}`,
       `Foque na interação entre os milestones da missão (${milestones.map(x => x.titulo).join(', ')}): contratos entre ` +
-      'eles, dados que um grava e outro lê, ordem de execução.', bugsCorrigidos)
+      `eles, dados que um grava e outro lê, ordem de execução.${semDeFora()}`, bugsCorrigidos)
     if (c.erro) return pararAqui({ motivo: c.erro })
     const repetidos = c.confirmados.filter(a => a.repete)
     if (repetidos.length) {
@@ -1197,7 +1207,7 @@ for (const [i, m] of pendentes.entries()) {
     const areas = m.caca ?? await areasDeCaca(m, conf.arquivos)
     for (let r = 1; ; r++) {
       const c = await cacar(`${m.titulo}, rodada ${r}`, areas, `${base}..${head}`,
-        `Milestone "${m.titulo}", critério: ${m.criterio}.`, bugsCorrigidos)
+        `Milestone "${m.titulo}", critério: ${m.criterio}.${semDeFora()}`, bugsCorrigidos)
       if (c.erro) return pararAqui({ motivo: c.erro })
       if (!c.confirmados.length) break
       const repetidos = c.confirmados.filter(a => a.repete)
