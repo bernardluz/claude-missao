@@ -38,6 +38,7 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   ignoraDump         { [feature]: vezes } o agente de commit lista o dump como fora da lista em vez de apagá-lo
 //   apagaAlem          { [feature]: [caminhos] } o agente de commit apaga e informa também o que não é dump
 //   arquivosDeFora     arquivos dos commits que não são da missão (padrão ['z/fora.js'])
+//   foraImpacta        resposta do agente que julga commit de fora (padrão true: para como antes)
 //   conferenciaInvalida vezes que o agente de conferência devolve texto em vez da saída do git-estado.mjs
 export const DUMP = 'bash.exe.stackdump'
 export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0000'], sujo: false }) {
@@ -78,6 +79,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       if (efeito === 'commitaOrfao') estado.git.push('orfao000')
       return null
     }
+    if (l === 'commit de fora') return { impacta: o.foraImpacta ?? true, motivo: 'julgado pelo agente' }
     if (l === 'skills da missão') return { skills: o.skills ?? [] }
     if (l === 'preparo' || l === 'conferência') {
       if (invalida > 0) { invalida--; return { saida: 'o repositório tem 3 commits novos e está limpo' } }

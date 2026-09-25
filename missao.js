@@ -53,6 +53,8 @@ const PADRAO = {
   suiteCompleta: null,
   // Modelo do agente que só roda o script de estado do git e devolve a saída literal.
   modeloConferencia: 'haiku',
+  // Modelo do agente que decide se um commit de fora da missão a impacta.
+  modeloCommitDeFora: 'sonnet',
 }
 // @config-inicio (substituído por instalar.mjs)
 const CONFIG_PROJETO = {}
@@ -70,7 +72,7 @@ const CONFIG = { ...PADRAO, ...CONFIG_PROJETO, ...(args?.config ?? {}) }
   const texto = v => v === null || typeof v === 'string'
   const erros = Object.keys(CONFIG).filter(k => !(k in PADRAO)).map(k => `chave desconhecida: ${k}`)
   for (const k of ['regrasTestes', 'regrasProjeto', 'revisor', 'leitor', 'suiteCompleta']) if (!texto(CONFIG[k])) erros.push(`${k} deve ser texto ou null`)
-  for (const k of ['formatoCommit', 'idioma', 'exemplosSkills', 'modeloConferencia']) if (typeof CONFIG[k] !== 'string') erros.push(`${k} deve ser texto`)
+  for (const k of ['formatoCommit', 'idioma', 'exemplosSkills', 'modeloConferencia', 'modeloCommitDeFora']) if (typeof CONFIG[k] !== 'string') erros.push(`${k} deve ser texto`)
   if (!Array.isArray(CONFIG.revisoresPorPasta) || !CONFIG.revisoresPorPasta.every(r => r && typeof r.prefixo === 'string' && typeof r.agentType === 'string')) {
     erros.push('revisoresPorPasta deve ser lista de { prefixo, agentType }')
   }
@@ -407,6 +409,39 @@ function commitsDeFora(c, esperados) {
   if (!esperados.every(e => c.commits.some(s => mesmoSha(s, e)))) return []
   return c.commits.filter(s => !esperados.some(e => mesmoSha(s, e)))
 }
+// Arquivos que a missão commitou nesta execução e os do milestone atual: base para julgar commit de fora.
+const arquivosDaMissao = new Set()
+let arquivosDoMilestone = new Set()
+
+const DE_FORA = {
+  type: 'object',
+  properties: { impacta: { type: 'boolean' }, motivo: { type: 'string' } },
+  required: ['impacta', 'motivo'],
+}
+// Commit de outra sessão ou automação não para a missão se não a impacta: tocar arquivo dela para na hora; o resto,
+// um agente barato julga pelo que o commit muda. emCurso: arquivos da feature ainda não conferida.
+async function julgarDeFora(c, deFora, fase, emCurso = []) {
+  const doMilestone = [...new Set([...arquivosDoMilestone, ...emCurso])]
+  const daMissao = new Set([...arquivosDaMissao, ...doMilestone])
+  const arquivosDe = s => (c.arquivosPorCommit?.[s] ?? []).map(normalizar)
+  const tocados = deFora.flatMap(arquivosDe).filter(a => naLista(daMissao, a))
+  if (tocados.length) return { impacta: true, motivo: `O commit de fora toca arquivo da missão: ${[...new Set(tocados)].join(', ')}` }
+  const r = await comRetentativa('commit de fora', () => agent(
+    'Apareceram na branch commits que não são desta missão:\n' +
+    deFora.map(s => `- ${s}: ${arquivosDe(s).join(', ') || 'arquivos não informados'}`).join('\n') +
+    '\nVeja mensagem, arquivos e diffstat de cada um com `git show --stat <sha>`.\n' +
+    `Arquivos da missão: ${[...arquivosDaMissao].join(', ') || 'nenhum ainda'}.\n` +
+    `Arquivos do milestone atual: ${doMilestone.join(', ') || 'nenhum ainda'}.\n` +
+    'Devolva impacta=true se algum desses commits toca arquivo da missão ou algo de que ela depende (build, ' +
+    'dependências, migrations do mesmo módulo, contrato que ela usa); senão impacta=false. Explique em motivo, numa ' +
+    'frase. Somente leitura.\n' + GIT_PROIBIDO,
+    { label: 'commit de fora', phase: fase, schema: DE_FORA, model: CONFIG.modeloCommitDeFora, effort: 'low' },
+  ))
+  if (!r) return { impacta: true, motivo: 'O agente que julga commit de fora não respondeu' }
+  if (!r.impacta) log(`commit de fora aceito, não impacta a missão: ${deFora.join(', ')}. ${r.motivo}`)
+  return r
+}
+
 // A missão não decide pelo usuário se fica um commit que ela não revisou: diz como aceitá-lo na retomada.
 const aceitar = headReal => 'ponha em retomar.commits a saída de `git rev-list --reverse <retomar.base>..HEAD` e em ' +
   `retomar.head o HEAD real, ${headReal}`
@@ -425,18 +460,22 @@ async function conferirCommit(f, commit, antes, arquivos, fase) {
   }
   const deFora = commitsDeFora(c, [commit])
   if (deFora.length) {
-    return { motivo: `commit de fora da missão logo depois da feature "${f.titulo}": ${deFora.join(', ')}. Em ${antes}..HEAD ` +
-      `só devia estar ${commit}, o commit da feature, que já entrou em retomar. ${comoAceitar(c.head)}` }
-  }
-  if (!mesmoSha(c.head, commit)) return { motivo: `HEAD real ${c.head} difere do commit declarado ${commit}` }
-  const alheios = c.arquivos.map(normalizar).filter(a => !naLista(arquivos, a))
+    const d = await julgarDeFora(c, deFora, fase, [...arquivos])
+    if (d.impacta) {
+      return { motivo: `commit de fora da missão logo depois da feature "${f.titulo}": ${deFora.join(', ')}. Em ${antes}..HEAD ` +
+        `só devia estar ${commit}, o commit da feature, que já entrou em retomar. ${comoAceitar(c.head)}. ${d.motivo}` }
+    }
+  } else if (!mesmoSha(c.head, commit)) return { motivo: `HEAD real ${c.head} difere do commit declarado ${commit}` }
+  // Com commit de fora aceito no intervalo, só os arquivos do commit da feature contam.
+  const doCommit = deFora.length ? c.arquivosPorCommit?.[c.commits.find(s => mesmoSha(s, commit))] ?? c.arquivos : c.arquivos
+  const alheios = doCommit.map(normalizar).filter(a => !naLista(arquivos, a))
   if (alheios.length) {
     return { naoAdotar: true, motivo: `o commit de "${f.titulo}", ${commit}, tem arquivos fora da lista revisada: ` +
       `${alheios.join(', ')}. Ele ficou fora do retomar. Para aceitá-lo, ${aceitar(c.head)}, e inclua "${f.titulo}" em ` +
       'retomar.concluidas; para recusá-lo, tire-o do histórico e retome sem mudar o retomar, e a feature se repete' }
   }
   if (!arvoreLimpa(c)) return { motivo: `árvore com mudanças não commitadas depois do commit de "${f.titulo}"${pendenciasDe(c)}` }
-  return {}
+  return { novos: c.commits, head: c.head }
 }
 
 // Em série, como na Mission: cada feature parte do commit da anterior.
@@ -537,8 +576,10 @@ async function implementar(features, fase) {
     // Commit de outra sessão no meio da missão para aqui, antes da próxima feature, e não só no fim do milestone.
     const pos = await conferirCommit(f, commit, antes, arquivos, fase)
     if (!pos.naoAdotar) {
-      head = commit
-      commits.push(commit)
+      // Conferido, o intervalo pode trazer também commits de fora aceitos, na ordem real.
+      head = pos.head ?? commit
+      commits.push(...(pos.novos ?? [commit]))
+      for (const a of arquivos) { arquivosDaMissao.add(a); arquivosDoMilestone.add(a) }
       resultados.push({ feature: f.titulo, ...r, commit, rodadasRevisao: rodada })
     }
     if (pos.motivo) return falhou(pararDepois ? `${pararDepois}. ${pos.motivo}` : pos.motivo)
@@ -582,7 +623,13 @@ async function conferir(base, esperados, fase = 'Validar') {
   if (!c) return { ok: false, semLeitura: true, motivo: 'conferência não retornou' }
   if (c.branch !== preparo.branch) return { ok: false, motivo: `branch mudou para "${c.branch}"` }
   const deFora = commitsDeFora(c, esperados)
-  if (deFora.length) return { ok: false, motivo: `commit de fora da missão em ${base}..HEAD: ${deFora.join(', ')}. ${comoAceitar(c.head)}` }
+  if (deFora.length) {
+    const d = await julgarDeFora(c, deFora, fase)
+    if (d.impacta) return { ok: false, motivo: `commit de fora da missão em ${base}..HEAD: ${deFora.join(', ')}. ${comoAceitar(c.head)}. ${d.motivo}` }
+    // Aceito: passa a ser esperado no milestone (a lista do chamador é atualizada aqui) e o HEAD anda até ele.
+    esperados.splice(0, esperados.length, ...c.commits)
+    head = c.head
+  }
   if (!arvoreLimpa(c)) return { ok: false, motivo: `árvore com mudanças não commitadas${pendenciasDe(c)}` }
   if (!mesmoSha(c.head, head)) return { ok: false, motivo: `HEAD real ${c.head} difere do declarado ${head}` }
   const bate = c.commits.length === esperados.length && c.commits.every((s, i) => mesmoSha(s, esperados[i]))
@@ -694,6 +741,7 @@ for (const [i, m] of pendentes.entries()) {
       `concluídos; orçamento de correções recomeça em ${MAX_RODADAS_CORRECAO} rodadas`)
   }
   const aFazer = m.features.filter(f => !jaConcluidas.includes(f.titulo))
+  arquivosDoMilestone = new Set()
   log(m.suite ? 'Suíte completa do projeto' : `Milestone: ${m.titulo} (${aFazer.length} de ${m.features.length} features a implementar)`)
   const pararAqui = extra => parar(m, base, feitas, commits, extra, jaConcluidas)
   const features = aFazer.map(f => ({ ...f, guias: guiaPorFeature.has(f.titulo) ? [guiaPorFeature.get(f.titulo)] : [] }))

@@ -117,6 +117,29 @@ describe('conferência logo depois do commit', () => {
     assert.match(r.resultado.motivo, /^após validação: commit de fora da missão em base0000\.\.HEAD: fora0002\./)
   })
 
+  test('commit de fora que não impacta: aceito, entra nos commits esperados e a missão segue', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const r = await rodar(plano(), { commitDeFora: { F2: 'fora0001', 'testes: M2': 'fora0002' }, foraImpacta: false }, estado)
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('commit de fora'), 2)
+    const juiz = r.chamadas.find(c => c.label === 'commit de fora')
+    assert.equal(juiz.model, 'sonnet')
+    assert.equal(juiz.effort, 'low')
+    assert.match(juiz.prompt, /- fora0001: z\/fora\.js/)
+    assert.match(juiz.prompt, /Arquivos do milestone atual: x\/a\.js/)
+    assert.ok(r.logs.some(l => l.startsWith('commit de fora aceito, não impacta a missão: fora0001.')))
+    assert.equal(r.resultado.head, estado.git.at(-1))
+    assert.match(r.resultado.relatorio[1].commits, new RegExp(`\\.\\.${estado.git.at(-1)}$`))
+  })
+
+  test('commit de fora que impacta para; se toca arquivo da missão, para sem consultar o agente', async () => {
+    const julgado = await rodar(plano(), { commitDeFora: { F2: 'fora0001' } })
+    assert.match(julgado.resultado.motivo, /"F2": fora0001\..*julgado pelo agente$/)
+    const tocando = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['x/a.js'], foraImpacta: false })
+    assert.match(tocando.resultado.motivo, /toca arquivo da missão: x\/a\.js$/)
+    assert.equal(tocando.contar('commit de fora'), 0)
+  })
+
   test('commit de fora que leva o diff da feature: para com o sha, sem mandar descartar diff', async () => {
     const r = await rodar(plano(), { commitDeForaTudo: { 'revisão: F1': 'fora0001' } })
     assert.match(r.resultado.motivo, /não commitou \(nada a commitar\), e base0000\.\.HEAD tem commit de fora da missão: fora0001,/)
