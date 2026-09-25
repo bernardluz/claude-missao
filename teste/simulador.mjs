@@ -136,7 +136,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (caca) {
       const [, m, r] = caca
       const n = (o.caca?.[m] ?? [])[Number(r) - 1] ?? 0
-      return { achados: Array.from({ length: n }, (_, i) => ({ arquivo: 'x/a.js', problema: `bug ${r}.${i + 1}`, repete: o.cacaRepete?.[m] === Number(r) })) }
+      return { achados: Array.from({ length: n }, (_, i) => ({ arquivo: 'x/a.js', problema: `bug ${r}.${i + 1}`, repete: o.cacaRepete?.[m] === Number(r) && /Já corrigidos nesta missão/.test(prompt) })) }
     }
     if (l.startsWith('verificação ')) return { confirmado: !(o.refuta && l.startsWith('verificação 2')), motivo: 'reproduzido' }
     if (l === 'aceite') {

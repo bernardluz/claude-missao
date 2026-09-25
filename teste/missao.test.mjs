@@ -992,3 +992,20 @@ describe('revisão: contexto nas etapas de caça e aceite', () => {
     }
   })
 })
+
+describe('revisão: bug só conta como corrigido depois da correção', () => {
+  test('correção de achado que não fecha não deixa o bug como corrigido no retomar', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { caca: { M1: [1] }, revisaoFeature: { 'correção 1.1 (M1)': [1, 1, 1, 1] } }, estado)
+    assert.equal(p1.resultado.parouEm, 'M1')
+    assert.match(p1.resultado.motivo, /não fechou após 3 rodadas/)
+    assert.deepEqual(p1.resultado.retomar.bugsCorrigidos, [])
+  })
+
+  test('correção da caça final que não fecha também não registra o bug', async () => {
+    const r = await rodar(plano(), { caca: { final: [1] }, revisaoFeature: { 'correção 1.1 (Suíte final)': [1, 1, 1, 1] } })
+    assert.equal(r.resultado.parouEm, 'Suíte final')
+    assert.deepEqual(r.resultado.retomar.bugsCorrigidos, [])
+    assert.equal(r.resultado.retomar.cacaFinalFeita, false)
+  })
+})

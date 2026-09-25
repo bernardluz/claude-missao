@@ -1207,9 +1207,10 @@ for (const [i, m] of pendentes.entries()) {
     if (repetidos.length) {
       return pararAqui({ motivo: 'a caça final confirmou de novo bug já corrigido nesta missão; decida à mão antes de retomar', problemas: repetidos })
     }
-    bugsCorrigidos.push(...c.confirmados.map(textoDoAchado))
     if (c.confirmados.length) e = await rodadaDeCorrecao(c.confirmados)
     if (e) return pararAqui(e)
+    // Só conta como corrigido depois de a correção fechar: parada no meio não pode virar falso "bug repetido".
+    bugsCorrigidos.push(...c.confirmados.map(textoDoAchado))
     cacaFinalFeita = true
   }
 
@@ -1229,8 +1230,12 @@ for (const [i, m] of pendentes.entries()) {
       if (repetidos.length) {
         return pararAqui({ motivo: 'a caça confirmou de novo bug já corrigido nesta missão; decida à mão antes de retomar', problemas: repetidos })
       }
-      bugsCorrigidos.push(...c.confirmados.map(textoDoAchado))
-      e = (await rodadaDeCorrecao(c.confirmados)) ?? await scrutiny()
+      // Só conta como corrigido depois de a correção fechar: parada no meio não pode virar falso "bug repetido".
+      e = await rodadaDeCorrecao(c.confirmados)
+      if (!e) {
+        bugsCorrigidos.push(...c.confirmados.map(textoDoAchado))
+        e = await scrutiny()
+      }
       if (e) return pararAqui(e)
       if (r >= MAX_RODADAS_CACA) {
         log(`${m.titulo}: teto de ${MAX_RODADAS_CACA} rodadas de caça bug; as correções da última rodada passaram no scrutiny`)
