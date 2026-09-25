@@ -1103,3 +1103,30 @@ describe('repete só vale apontando item existente da lista de corrigidos', () =
     assert.match(r.prompt('caça: geral (M1, rodada 2)'), /o número dele\):\n1\. x\/a\.js bug 1\.1/)
   })
 })
+
+describe('aprendizados nas paradas e na retomada', () => {
+  const embutido = (texto, args, opcoes, estado) =>
+    executar(gerar(readFileSync(NUCLEO, 'utf8'), {}, '', lerEtapas(), texto).replace('export const meta', 'const meta'), args, opcoes, estado)
+
+  test('paradas de simplicidade, planejar e pré-voo trazem a sugestão', async () => {
+    const simp = await rodar({ spec: 's.md' }, { perguntas: ['p?'], aprendizados: { simplicidade: ['rode com forks=1'] } })
+    assert.equal(simp.resultado.parouEm, 'simplicidade')
+    assert.equal(simp.resultado.sugestaoAprendizados, '- rode com forks=1\n')
+    const plan = await rodar({ spec: 's.md' }, { planoGerado: [{ titulo: 'Suíte final', criterio: 'c', features: [{ titulo: 'H', spec: 's' }] }], aprendizados: { planejar: ['x'] } })
+    assert.equal(plan.resultado.parouEm, 'planejar')
+    assert.equal(plan.resultado.sugestaoAprendizados, '- x\n')
+    const voo = await rodar(plano(), { preVooFalta: ['Docker'], aprendizados: { 'pré-voo': ['docker info antes'] } })
+    assert.equal(voo.resultado.parouEm, 'pré-voo')
+    assert.equal(voo.resultado.sugestaoAprendizados, '- docker info antes\n')
+  })
+
+  test('aprendizados do retomar já embutidos no projeto não voltam nem entram na sugestão', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await embutido('', plano(), { aprendizados: { F1: ['rode com forks=1', 'b1'] }, validacao: [2, 2] }, estado)
+    assert.deepEqual(p1.resultado.retomar.contexto.aprendizados, ['rode com forks=1', 'b1'])
+    const p2 = await embutido('- Rode com forks=1.', plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.deepEqual(p2.resultado.aprendizados, ['b1'])
+    assert.equal(p2.resultado.sugestaoAprendizados, '- b1\n')
+  })
+})

@@ -323,7 +323,6 @@ const bugsCorrigidos = Array.isArray(retomar?.bugsCorrigidos) ? retomar.bugsCorr
 if (retomar?.contexto) {
   const lista = v => (Array.isArray(v) ? v : [])
   contexto.areas = lista(retomar.contexto.areas)
-  contexto.aprendizados.push(...lista(retomar.contexto.aprendizados).filter(a => typeof a === 'string'))
 }
 // Aprendizado é técnica ou armadilha durável; o filtro barra excesso e repetição, o prompt barra estado do momento.
 const MAX_APRENDIZADOS_POR_WORKER = 3
@@ -342,8 +341,16 @@ function aprender(r) {
   }
   return r
 }
-// Texto pronto para o agente pai revisar e acrescentar ao .claude/missao/aprendizados.md do projeto.
-const sugestaoAprendizados = () => (contexto.aprendizados.length ? `${contexto.aprendizados.map(a => `- ${a}`).join('\n')}\n` : null)
+// Os do retomar passam pelo mesmo filtro, sem o limite por agente: o aprendizados.md pode ter crescido desde a parada.
+for (const t of Array.isArray(retomar?.contexto?.aprendizados) ? retomar.contexto.aprendizados : []) {
+  const n = typeof t === 'string' ? normalizarAprendizado(t) : ''
+  if (n && !jaNoProjeto.has(n) && !contexto.aprendizados.some(a => normalizarAprendizado(a) === n)) contexto.aprendizados.push(t.trim())
+}
+// Texto pronto para o agente pai revisar e acrescentar ao .claude/missao/aprendizados.md do projeto, sem o que já está lá.
+function sugestaoAprendizados() {
+  const novos = contexto.aprendizados.filter(a => !jaNoProjeto.has(normalizarAprendizado(a)))
+  return novos.length ? `${novos.map(a => `- ${a}`).join('\n')}\n` : null
+}
 // Agente que trabalha, revisa ou valida: o que ele aprende entra no contexto dos próximos prompts.
 const trabalhar = async (prompt, opt) => aprender(await agent(prompt, opt))
 const APRENDER = `Em aprendizados, devolva só técnica ou armadilha durável, que valha para a próxima missão (comando ` +
@@ -414,12 +421,12 @@ if (!milestones) {
     'leitura.\n' + GIT_PROIBIDO),
     { label: 'simplicidade', phase: 'Simplicidade', agentType: comoAgente(CONFIG.leitor), schema: SIMPLICIDADE },
   ))
-  if (!s) return { parouEm: 'simplicidade', motivo: 'o agente que verifica a simplicidade não respondeu', aprendizados: contexto.aprendizados }
+  if (!s) return { parouEm: 'simplicidade', motivo: 'o agente que verifica a simplicidade não respondeu', aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
   if (!s.ok || s.perguntas.length || s.cortes.length) {
     return {
       parouEm: 'simplicidade',
       motivo: 'a verificação de simplicidade trouxe perguntas ou cortes: decida, ajuste a SPEC e rode de novo (nenhum código foi escrito)',
-      perguntas: s.perguntas, cortes: s.cortes, aprendizados: contexto.aprendizados,
+      perguntas: s.perguntas, cortes: s.cortes, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(),
     }
   }
   phase('Planejar')
@@ -434,7 +441,7 @@ if (!milestones) {
   // Campo opcional vazio conta como ausente.
   const gerado = p?.milestones?.map(m => ({ ...m, caca: m.caca?.length ? m.caca : undefined, userTesting: m.userTesting?.trim() || undefined }))
   const erro = gerado ? erroDoPlano(gerado) : 'o agente de planejamento não respondeu'
-  if (erro) return { parouEm: 'planejar', motivo: `plano gerado não serve: ${erro}`, plano: p ?? null, aprendizados: contexto.aprendizados }
+  if (erro) return { parouEm: 'planejar', motivo: `plano gerado não serve: ${erro}`, plano: p ?? null, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
   milestones = JSON.parse(JSON.stringify(gerado))
   log(`Plano gerado: ${milestones.length} milestones, ${milestones.reduce((n, m) => n + m.features.length, 0)} features`)
 }
@@ -480,7 +487,7 @@ if (!preVoo || !preVoo.ok) {
     : 'o agente de pré-voo não respondeu'
   // Parada antes de qualquer commit: devolve o retomar recebido ou um que recomeça no primeiro milestone.
   const r = retomar ?? parar(pendentes[0], head, [], [], {}).retomar
-  return { parouEm: 'pré-voo', motivo, faltando: preVoo?.faltando ?? [], plano: { milestones }, contexto, aprendizados: contexto.aprendizados, retomar: r }
+  return { parouEm: 'pré-voo', motivo, faltando: preVoo?.faltando ?? [], plano: { milestones }, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), retomar: r }
 }
 
 // Hidratação, como a Factory: o contexto do plano (guias por área, montados a partir do código atual) é gerado UMA vez
