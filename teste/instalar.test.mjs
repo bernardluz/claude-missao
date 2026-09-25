@@ -277,6 +277,7 @@ test('instala a skill enxugar-codigo e embute os complementos .enxugar das etapa
   assert.match(skill, /<!-- modo: enxugar -->/)
   const etapas = lerEtapas(raiz)
   assert.deepEqual(Object.keys(etapas).filter(k => k.endsWith('.enxugar')), ['aceite.enxugar', 'caca-bug.enxugar',
-    'implementar.enxugar', 'planejar.enxugar', 'pre-voo.enxugar', 'prova-de-contrato.enxugar', 'verificar-simplicidade.enxugar'])
+    'corrigir.enxugar', 'implementar.enxugar', 'planejar.enxugar', 'pre-voo.enxugar', 'prova-de-contrato.enxugar',
+    'revisar.enxugar', 'scrutiny.enxugar', 'verificar-simplicidade.enxugar'])
   assert.ok(readFileSync(destino, 'utf8').includes(JSON.stringify(etapas['implementar.enxugar'])))
 })

@@ -1135,7 +1135,8 @@ describe('modo enxugar', () => {
   const COMPLEMENTOS = [
     ['simplicidade', 'verificar-simplicidade'], ['planejar', 'planejar'], ['pré-voo', 'pre-voo'], ['contrato: M1', 'prova-de-contrato'],
     ['F1', 'implementar'], ['caça: geral (M1, rodada 1)', 'caca-bug'], ['verificação 1: achado 1 (M1, rodada 1)', 'caca-bug'],
-    ['aceite', 'aceite'],
+    ['aceite', 'aceite'], ['revisão: F1', 'revisar'], ['revisão: M1', 'scrutiny'], ['testes: M1', 'scrutiny'],
+    ['correção 1.1 (M1)', 'corrigir'],
   ]
   const primeiraLinha = nome => readFileSync(new URL(`../etapas/${nome}.enxugar.md`, import.meta.url), 'utf8').split('\n')[0]
 
@@ -1145,7 +1146,6 @@ describe('modo enxugar', () => {
     for (const [label, etapa] of COMPLEMENTOS) {
       assert.ok(r.prompt(label).includes(`Modo enxugar (código existente):\n${primeiraLinha(etapa)}`), label)
     }
-    assert.doesNotMatch(r.prompt('revisão: F1'), /Modo enxugar/)
     assert.match(r.prompt('pré-voo'), /devolva em medicao/)
     assert.match(r.prompt('aceite'), /Meça do mesmo jeito que no início: \{"linhas":23000/)
     assert.equal(r.resultado.modo, 'enxugar')
@@ -1174,5 +1174,15 @@ describe('modo enxugar', () => {
 
   test('modo desconhecido é recusado', async () => {
     await assert.rejects(rodar(plano({ modo: 'outro' })), /args inválido/)
+  })
+})
+
+describe('modo enxugar: correção não restaura o que saiu', () => {
+  test('a frase fixa da correção muda só no modo enxugar', async () => {
+    const enx = await rodarCom({}, { spec: 's.md', modo: 'enxugar' }, { caca: { M1: [1] } })
+    assert.match(enx.prompt('correção 1.1 (M1)'), /não restaure código nem teste que saiu de propósito/)
+    assert.doesNotMatch(enx.prompt('correção 1.1 (M1)'), /Corrija a causa: não desative/)
+    const normal = await rodarCom({}, { spec: 's.md' }, { caca: { M1: [1] } })
+    assert.match(normal.prompt('correção 1.1 (M1)'), /Corrija a causa: não desative, pule nem enfraqueça testes/)
   })
 })

@@ -1227,7 +1227,10 @@ for (const [i, m] of pendentes.entries()) {
       titulo: `correção ${rodada}.${i + 1} (${m.titulo})`,
       spec: `Corrija: ${p}\n${m.suite ? 'Falha da suíte completa ao fim da missão' : `Milestone "${m.titulo}", critério: ${m.criterio}, commits ${base}..${head}`}.${semDeFora()}\n` +
         `Outros problemas da mesma rodada (podem ser duplicados deste ou já corrigidos): ${todos.filter((_, j) => j !== i).join(' | ') || 'nenhum'}.\n` +
-        'Corrija a causa: não desative, pule nem enfraqueça testes, e não mexa em limites de cobertura para passar.',
+        (MODO === 'enxugar'
+          ? 'Corrija a causa dentro do modelo alvo: não restaure código nem teste que saiu de propósito, e os testes do ' +
+            'que continua no modelo alvo não se desativam, pulam nem enfraquecem; não mexa em limites de cobertura para passar.'
+          : 'Corrija a causa: não desative, pule nem enfraqueça testes, e não mexa em limites de cobertura para passar.'),
       guias: guiasDoMilestone,
       etapa: 'corrigir',
     }))
