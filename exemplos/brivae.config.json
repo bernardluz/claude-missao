@@ -6,5 +6,6 @@
   "leitor": "explorer",
   "proibicoesExtras": ["variáveis BRIVAE_SKIP_*"],
   "exemplosSkills": "migration + entidade, endpoint com teste de integração, tela Flutter",
-  "suiteCompleta": "monte o recorte com gate.selected(<raiz do repositório>, '{inicio}', 'HEAD') de scripts/promotion/gate.py (importe o módulo; o main() só roda na VPS) e execute localmente, em ordem, cada comando {cwd, argv} de cada área devolvida; em services o recorte já traz os módulos tocados com -am -amd; npm ci e flutter pub get --enforce-lockfile do recorte são permitidos (não reescrevem lockfile); tente todos os comandos mesmo após falha"
+  "suiteCompleta": "monte o recorte com gate.selected(<raiz do repositório>, '{inicio}', 'HEAD') de scripts/promotion/gate.py (importe o módulo; o main() só roda na VPS) e execute localmente, em ordem, cada comando {cwd, argv} de cada área devolvida; em services o recorte já traz os módulos tocados com -am -amd; npm ci e flutter pub get --enforce-lockfile do recorte são permitidos (não reescrevem lockfile); tente todos os comandos mesmo após falha",
+  "preVoo": "Docker vivo (docker info); testes de services com -Dbrivae.test.forks=1; suítes só-Linux (*.tests.ps1) pelo WSL com pwsh"
 }

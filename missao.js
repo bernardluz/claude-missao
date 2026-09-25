@@ -1,6 +1,6 @@
 export const meta = {
   name: 'missao',
-  description: 'Executa um plano em milestones: features em série com commit atômico, validação e correções, parando se não fechar',
+  description: 'Executa uma SPEC ou um plano em milestones: features em série com commit atômico, validação, caça bug e correções, parando se não fechar',
   whenToUse: 'Trabalho grande em milestones e features (estilo Factory Missions). Passe o plano em args.milestones, ou a SPEC em args.spec para a missão conferir a simplicidade e planejar; para retomar, passe em args.retomar o objeto devolvido na parada. Agente pulado é retentado: use maxRetentativasInfra 0 para evitar.',
   phases: [
     { title: 'Preparar', detail: 'confere árvore limpa, branch e HEAD base pelo script de estado do git' },
@@ -8,8 +8,8 @@ export const meta = {
     { title: 'Planejar', detail: 'só com spec: gera o plano em milestones, que volta no retomar' },
     { title: 'Pré-voo', detail: 'confere se o ambiente roda testes e suíte antes de qualquer commit' },
     { title: 'Contexto', detail: 'contexto do plano por área, gerado uma vez e reaproveitado na retomada' },
-    { title: 'Implementar', detail: 'por feature, em série: implementa, revisão independente, commit' },
     { title: 'Contrato', detail: 'por milestone: confere no código do dono as premissas das features' },
+    { title: 'Implementar', detail: 'por feature, em série: implementa, revisão independente, commit' },
     { title: 'Scrutiny', detail: 'confere commits; testes, lint, typecheck e revisão contra o critério do milestone' },
     { title: 'Corrigir', detail: 'um item por problema apontado, com revisão e commit próprios' },
     { title: 'Caça bug', detail: 'caçador por área; cada achado com 2 verificadores; confirmado vira correção' },
@@ -25,12 +25,13 @@ export const meta = {
 // args: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } (ou plano: { milestones })
 //       ou { spec } (texto ou caminho da SPEC: a missão confere a simplicidade e gera o plano), mais
 //       maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, maxRetentativasInfra?,
-//       retomar?, config?
-// Um commit atômico por feature, só depois de revisão independente aprovada, e conferido logo em seguida: commit de
-// outra sessão no intervalo para a missão ali. A validação do milestone revisa e testa o conjunto e cria etapas de
-// correção, em loop até aprovar ou parar de progredir. Depois do último milestone,
-// a suíte completa do que a missão tocou, e de quem depende disso, roda uma vez e entra no mesmo loop de correção.
-// Correções seguem enquanto a validação aponta menos problemas que na rodada anterior; o teto só evita loop infinito.
+//       maxRodadasCaca?, aceite?, retomar?, config?
+// Etapas: [simplicidade e plano, só com spec] → pré-voo → contexto do plano → por milestone: prova de contrato,
+// features (implementa → revisão independente → commit atômico conferido), scrutiny ⇄ correções, caça bug ⇄ correções,
+// user testing ⇄ correções → caça final entre milestones → suíte completa ⇄ correções → aceite.
+// O git é lido pelo script git-estado.mjs, nunca pela interpretação de um modelo. Commit de outra sessão que não
+// impacta a missão é aceito; o que impacta para a missão ali.
+// Correções seguem enquanto a avaliação aponta menos problemas que na rodada anterior; o teto só evita loop infinito.
 // Prompt de etapa = técnica da etapa (etapas/<etapa>.md, embutida na instalação) + contexto do plano + aprendizados.
 // O contexto do plano é gerado uma vez por missão e volta no retomar; os aprendizados dos workers se acumulam nele.
 // Milestones pequenos: validar cedo evita o acúmulo de erros de um milestone gigante validado só no fim.

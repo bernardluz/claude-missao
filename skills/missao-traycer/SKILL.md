@@ -1,6 +1,6 @@
 ---
 name: missao-traycer
-description: "Executa no Traycer um plano grande em milestones e features, com as garantias do claude-missao: uma feature por vez com agente próprio, revisão independente antes de cada commit atômico, git conferido, loop validar/corrigir que para quando não progride e retomada. Milestones viram stories e features viram tickets. Use quando o usuário pedir missão, missao-traycer ou execução de plano em milestones no Traycer."
+description: "Executa no Traycer uma SPEC ou um plano grande em milestones e features, com as garantias do claude-missao: uma feature por vez com agente próprio, revisão independente antes de cada commit atômico, git conferido por script, scrutiny, caça bug e correções que param quando não progridem, aceite e retomada. Milestones viram stories e features viram tickets. Use quando o usuário pedir missão, missao-traycer ou execução de plano em milestones no Traycer."
 ---
 
 # Missão no Traycer
@@ -31,7 +31,18 @@ Valem para você e para todo filho, em qualquer passo:
 ## Entrada
 
 O plano vem do usuário, de um artefato do epic ou de `args`:
-`milestones: [{ titulo, criterio, features: [{ titulo, spec }] }]`, com títulos únicos.
+`milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }]`, com títulos únicos. `caca`
+são as áreas de caça-bug do milestone; `userTesting`, a jornada que um usuário percorre.
+
+Também pode vir só a `spec` (caminho ou texto). Nesse caso, antes de tudo:
+1. **Simplicidade.** Um filho só-leitura compara a SPEC com o código e devolve perguntas e cortes sugeridos.
+   Havendo qualquer um, pare e mostre tudo junto ao usuário, sem escrever código.
+2. **Planejar.** Aprovada, um filho só-leitura gera o plano no formato acima. Grave-o em `estado/`: a retomada não
+   replaneja.
+
+A técnica curta de cada etapa (`verificar-simplicidade`, `planejar`, `pre-voo`, `prova-de-contrato`,
+`implementar`, `revisar`, `scrutiny`, `corrigir`, `caca-bug`, `user-testing`, `aceite`) está embutida em
+`const ETAPAS` de `.claude/workflows/missao.js`. Passe a da etapa no briefing do filho correspondente.
 
 | Limite | Padrão | Ao estourar |
 |---|---|---|
@@ -40,6 +51,7 @@ O plano vem do usuário, de um artefato do epic ou de `args`:
 | `maxRodadasCorrecao` | 5 | teto do loop validar/corrigir por milestone |
 | `maxProblemasPorRodada` | 10 | acima disso o plano provavelmente está errado: pare |
 | `maxRetentativasInfra` | 2 | agente que caiu ou sumiu; `0` faz a primeira queda parar a missão |
+| `maxRodadasCaca` | 3 | rodadas de caça bug por milestone; depois disso, siga |
 
 Plano ambíguo ou sem critério de aceite: resolva **antes** de começar, com uma pergunta por vez. Durante a missão,
 o usuário só é chamado nas paradas.
@@ -51,7 +63,8 @@ Leia `.claude/missao.config.json` se existir. As chaves são as mesmas do workfl
 - `regrasTestes`, `regrasProjeto`: arquivos citados aos filhos.
 - `revisor`, `revisoresPorPasta`, `leitor`: nomes em `.claude/agents/`. O filho Traycer recebe a instrução de ler
   `.claude/agents/<nome>.md` e seguir aquele papel, só com leitura.
-- `proibicoesExtras`, `formatoCommit`, `idioma`, `exemplosSkills`, `suiteCompleta`: veja o README do claude-missao.
+- `proibicoesExtras`, `formatoCommit`, `idioma`, `exemplosSkills`, `suiteCompleta`, `preVoo`: veja o README do
+  claude-missao. `modeloConferencia` e `modeloCommitDeFora` valem só para o workflow.
 
 O revisor vem **sempre** da configuração. Nem o plano nem o usuário no meio da execução o desligam.
 
@@ -62,39 +75,49 @@ Tudo no epic atual. Crie ao preparar a missão:
 ```
 missao-<slug>/            story   "Missão: <nome>"            status 0→1→2
   estado/                 spec    estado para retomada (abaixo)
-  guias/                  spec    guias da missão por tipo de feature
+  contexto/               spec    contexto do plano por área e aprendizados da missão
   m1-<slug>/              story   milestone com o critério de aceite
     f1-<slug>/            ticket  feature: spec, arquivos, rodadas, commit
       revisao-1/          review  apontamentos de cada rodada
-    c1-<slug>/            ticket  correção vinda da validação
+    c1-<slug>/            ticket  correção vinda do scrutiny, da caça bug ou do user testing
   suite-final/            story   só se chegar lá
 ```
 
 `estado/index.md` é a fonte da retomada. Atualize-o **a cada passo concluído**, sem esperar o fim do milestone:
 raiz do repo, branch, commit inicial (`inicio`), HEAD esperado, lista de commits por feature (`sha`, título,
-arquivos), milestone e feature atuais, rodada de correção, contagem de problemas da rodada anterior e as lições da
-missão (regras cobradas por revisor ou gate).
+arquivos), milestone e feature atuais, rodada de correção, contagem de problemas da rodada anterior, o plano (se veio
+da SPEC), os bugs já corrigidos pela caça e as lições da missão (regras cobradas por revisor ou gate).
 
 ## Fluxo
 
 ### 1. Preparar
 
-Rode você mesmo e confira: raiz (`git rev-parse --show-toplevel`), branch, `git status --porcelain` vazio (salvo dump
-de crash do bash, que você apaga) e HEAD.
+Toda leitura de git da missão usa `node .claude/missao/git-estado.mjs <base>`: ele imprime um JSON com `head`,
+`branch`, `raiz`, `limpo`, `pendencias`, `commits` (em ordem) e `arquivos`. Confira pelo JSON, não por resumo.
+Para preparar, rode com `HEAD` como base: árvore limpa (salvo dump de crash do bash, que você apaga).
 Árvore suja ou branch `main`: pare e diga por quê. Grave `inicio` = HEAD no estado.
 
-### 2. Guias da missão
+Depois, o **pré-voo**: um filho confere se o ambiente roda o que a missão vai precisar (`preVoo` da configuração, ou
+o que ele descobrir pelo plano). Faltou algo: pare antes de qualquer commit, com a lista do que falta.
 
-Um filho só-leitura (papel `leitor`) lê o plano e o código e escreve em `guias/` um guia curto por tipo de feature
-(ex.: `exemplosSkills`): arquivos de referência, padrões, testes focados. Os guias vivem só nesta missão. Nunca vão
-para `.claude/skills/`.
+### 2. Contexto do plano
+
+Um filho só-leitura (papel `leitor`) lê o plano e o código e escreve em `contexto/` um guia curto por área
+(ex.: `exemplosSkills`): arquivos de referência, padrões, testes focados, armadilhas. Gere uma vez por missão; na
+retomada, reaproveite. Nunca vai para `.claude/skills/`. Todo filho pode devolver **aprendizados** (fatos não óbvios,
+como "rode com forks=1"): grave-os em `contexto/` e passe-os nos próximos briefings. Ao fim, entregue-os ao usuário
+para levar ao `AGENTS.md` da área.
+
+Antes das features de cada milestone, a **prova de contrato**: um filho só-leitura lista as premissas das features
+sobre outros serviços ou módulos (rotas, campos, ids, comportamento) e confere cada uma no código do dono. Premissa
+que não confere: pare com todas as perguntas juntas, antes de implementar.
 
 ### 3. Cada feature, em série
 
 Uma feature por vez. Ticket em status 1.
 
 1. **Implementar.** Crie um filho novo (`traycer_create_agent`, mesmo workspace) e mande: spec da feature, guia do
-   tipo, `regrasTestes`, `regrasProjeto`. Proibido: commit, amend, stash, push, trocar de branch, reset/checkout
+   da área, `regrasTestes`, `regrasProjeto`. Proibido: commit, amend, stash, push, trocar de branch, reset/checkout
    destrutivo, `--no-verify`, criar agentes e `proibicoesExtras`. Ele escreve os próprios testes. Cite no briefing as
    [Regras para todos](#regras-para-todos). Se a feature usar escape Unicode, inclua o aviso de
    [Escapes Unicode](#escapes-unicode). Inclua também as **lições** da missão: regras que um revisor ou gate já cobrou
@@ -132,7 +155,7 @@ Uma feature por vez. Ticket em status 1.
    sem gravá-lo. Tudo certo: grave no estado e no ticket. Ticket em status 2. Arquive os dois filhos
    (`traycer_archive_agent`).
 
-### 4. Validar o milestone
+### 4. Scrutiny do milestone
 
 Um filho novo, papel `revisor`, só leitura quanto ao código, mas pode rodar testes focados conforme `regrasTestes`.
 Passe o critério do milestone e o intervalo `<commit antes do milestone>..HEAD`. Resposta: `aprovado` ou uma lista
@@ -147,13 +170,29 @@ de problemas, cada um com evidência (arquivo, teste, saída).
 O loop continua enquanto cada rodada aponta **menos** problemas que a anterior. Pare se a contagem não cair, se
 passar de `maxRodadasCorrecao` ou se passar de `maxProblemasPorRodada`.
 
+**Caça bug**, depois que o scrutiny aprova: um filho caçador por área (`caca` do milestone, ou áreas que você deriva
+dos arquivos tocados) sobre o diff do milestone. Cada achado vai a **dois** filhos verificadores que tentam
+refutá-lo; só o confirmado pelos dois vira ticket de correção, e depois o scrutiny roda de novo. Rodada sem bug
+confirmado encerra a caça; `maxRodadasCaca` também. Bug já corrigido e confirmado de novo: pare pedindo decisão.
+
+**User testing**, só com `userTesting` no milestone: um filho percorre a jornada como usuário na stack local, nunca em
+produção. Falha vira correção, scrutiny de novo e novo user testing.
+
 ### 5. Suíte final
+
+Antes dela, a **caça final**: uma rodada curta de caça bug sobre `<inicio>..HEAD`, focada na interação entre os
+milestones (só com dois ou mais), com os mesmos verificadores. Achado confirmado vira correção.
 
 Depois do último milestone, um filho roda a suíte completa do que a missão tocou e de quem depende disso: o
 `suiteCompleta` da configuração, com `{inicio}` trocado, ou os módulos do `git diff <inicio>..HEAD` e seus
 dependentes. Cada falha vira correção, no mesmo loop do passo 4.
 
-Ao fim: story da missão em status 2 e um resumo curto ao usuário: commits, o que foi validado e o que ficou de fora.
+Com a suíte verde, o **aceite**: um filho liga cada critério de aceite (da SPEC, do usuário ou dos milestones) a uma
+evidência (teste que passou, commit). Critério sem evidência vira correção uma vez; se continuar sem, termine
+reportando o que faltou.
+
+Ao fim: story da missão em status 2 e um resumo curto ao usuário: commits, o que foi validado, os aprendizados e o
+que ficou de fora.
 
 ## Quedas
 
@@ -172,7 +211,7 @@ Cada queda conta em `maxRetentativasInfra`. Esgotou: pare.
 
 Pare, sem commitar nada pendente, quando:
 - um limite estourar;
-- aparecer commit que não é seu ([Commit de fora](#commit-de-fora));
+- aparecer commit que não é seu e que impacta a missão ([Commit de fora](#commit-de-fora));
 - o harness recusar um comando seu ou de um filho;
 - o git não bater com o estado;
 - surgir desalinhamento de produto.
@@ -189,7 +228,10 @@ mostre a diferença ao usuário.
 
 ### Commit de fora
 
-Commit de outra sessão ou automação no meio da missão faz você parar na hora, sem adotá-lo. Diga ao usuário o SHA
+Commit de outra sessão ou automação no meio da missão: se ele toca arquivo da missão, pare na hora. Senão, um filho
+só-leitura olha a mensagem, os arquivos e o diffstat e diz se ele afeta algo de que a missão depende (build,
+dependências, migrations do mesmo módulo, contrato usado). Não afeta: grave-o no estado como de fora, na ordem do
+`--reverse`, atualize o HEAD esperado e siga. Afeta: pare sem adotá-lo. Diga ao usuário o SHA
 (`git rev-list --reverse <HEAD esperado>..HEAD`) e as duas saídas:
 
 - **Aceitar:** grave na lista de commits do estado todos os SHAs do intervalo, na ordem do `--reverse`: os de fora
