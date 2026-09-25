@@ -21,7 +21,7 @@ function projetoTemporario(config) {
 
 test('chaves aceitas vêm do PADRAO do núcleo', () => {
   assert.deepEqual(chavesAceitas(nucleo).sort(), [
-    'exemplosSkills', 'formatoCommit', 'idioma', 'leitor', 'modeloCommitDeFora', 'modeloConferencia', 'proibicoesExtras', 'regrasProjeto',
+    'exemplosSkills', 'formatoCommit', 'idioma', 'leitor', 'modeloCommitDeFora', 'modeloConferencia', 'preVoo', 'proibicoesExtras', 'regrasProjeto',
     'regrasTestes', 'revisor', 'revisoresPorPasta', 'suiteCompleta',
   ])
 })

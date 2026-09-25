@@ -23,7 +23,7 @@ describe('fluxo principal', () => {
     const r = await rodar(plano())
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.commits, 3)
-    assert.equal(r.agentes, 2 + 4 * 3 + 4 * 2 + 3)
+    assert.equal(r.agentes, 3 + 4 * 3 + 4 * 2 + 3)
     assert.equal(r.contar('suíte completa'), 1)
     assert.match(r.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${r.agentes} agentes`))
     assert.equal(r.contar('revisão: F'), 3)
@@ -664,5 +664,68 @@ describe('etapas, contexto do plano e aprendizados', () => {
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
     assert.match(p2.prompt('revisão: M2'), /- o Banking devolve 404 sem acesso/)
     assert.deepEqual(p2.resultado.aprendizados, p1.resultado.aprendizados)
+  })
+})
+
+describe('spec, planejamento e pré-voo', () => {
+  const comSpec = (extra = {}) => ({ spec: 'docs/spec.md', ...extra })
+
+  test('plano direto pula simplicidade e planejamento; args.plano também serve', async () => {
+    const direto = await rodar(plano())
+    assert.equal(direto.contar('simplicidade') + direto.contar('planejar'), 0)
+    const r = await rodar({ plano: { milestones: plano().milestones } })
+    assert.equal(r.resultado.concluido, true)
+    assert.deepEqual(r.resultado.plano.milestones.map(m => m.titulo), ['M1', 'M2'])
+  })
+
+  test('sem plano nem spec, args é recusado', async () => {
+    await assert.rejects(rodar({}), /args inválido/)
+  })
+
+  test('simplicidade com perguntas ou cortes para antes de planejar, devolvendo tudo junto', async () => {
+    const r = await rodar(comSpec(), { perguntas: ['a fila é mesmo assíncrona?'], cortes: ['tabela de histórico sem uso'] })
+    assert.equal(r.resultado.parouEm, 'simplicidade')
+    assert.deepEqual(r.resultado.perguntas, ['a fila é mesmo assíncrona?'])
+    assert.deepEqual(r.resultado.cortes, ['tabela de histórico sem uso'])
+    assert.match(r.resultado.motivo, /nenhum código foi escrito/)
+    assert.equal(r.contar('planejar'), 0)
+    assert.equal(r.commits, 0)
+    assert.match(r.prompt('simplicidade'), /SPEC \(texto, ou caminho de arquivo no repositório para ler inteiro\):\ndocs\/spec\.md/)
+  })
+
+  test('spec aprovada: plano gerado executa e volta no resultado e no retomar; a retomada não replaneja', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const gerado = [{ titulo: 'G1', criterio: 'c', caca: [], userTesting: ' ', features: [{ titulo: 'H1', spec: 's' }] }]
+    const p1 = await rodar(comSpec(), { planoGerado: gerado, suite: [2, 2] }, estado)
+    assert.equal(p1.contar('simplicidade'), 1)
+    assert.equal(p1.contar('planejar'), 1)
+    assert.equal(p1.resultado.parouEm, 'Suíte final')
+    assert.deepEqual(p1.resultado.retomar.plano, { milestones: [{ titulo: 'G1', criterio: 'c', features: [{ titulo: 'H1', spec: 's' }] }] })
+    const p2 = await rodar(comSpec({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('simplicidade') + p2.contar('planejar'), 0)
+    assert.deepEqual(p2.resultado.plano, p1.resultado.retomar.plano)
+  })
+
+  test('plano gerado inválido para sem código', async () => {
+    const r = await rodar(comSpec(), { planoGerado: [{ titulo: 'Suíte final', criterio: 'c', features: [{ titulo: 'H', spec: 's' }] }] })
+    assert.equal(r.resultado.parouEm, 'planejar')
+    assert.match(r.resultado.motivo, /plano gerado não serve: "Suíte final" é reservado/)
+    assert.equal(r.commits, 0)
+  })
+
+  test('pré-voo que falha para antes de qualquer commit, com o que falta e um retomar que recomeça do início', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodarCom({ preVoo: 'Docker vivo e -Dbrivae.test.forks=1' }, plano(), { preVooFalta: ['Docker parado: rode docker info'] }, estado)
+    assert.equal(p1.resultado.parouEm, 'pré-voo')
+    assert.match(p1.resultado.motivo, /o ambiente não está pronto: Docker parado: rode docker info/)
+    assert.deepEqual(p1.resultado.faltando, ['Docker parado: rode docker info'])
+    assert.equal(p1.contar('F1'), 0)
+    assert.equal(p1.commits, 0)
+    assert.match(p1.prompt('pré-voo'), /Docker vivo e -Dbrivae\.test\.forks=1/)
+    assert.equal(p1.resultado.retomar.aPartirDe, 'M1')
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('pré-voo'), 1)
   })
 })

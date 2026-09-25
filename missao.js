@@ -1,9 +1,12 @@
 export const meta = {
   name: 'missao',
   description: 'Executa um plano em milestones: features em série com commit atômico, validação e correções, parando se não fechar',
-  whenToUse: 'Trabalho grande já planejado em milestones e features (estilo Factory Missions). Passe o plano em args; para retomar, passe em args.retomar o objeto devolvido na parada. Agente pulado é retentado: use maxRetentativasInfra 0 para evitar.',
+  whenToUse: 'Trabalho grande em milestones e features (estilo Factory Missions). Passe o plano em args.milestones, ou a SPEC em args.spec para a missão conferir a simplicidade e planejar; para retomar, passe em args.retomar o objeto devolvido na parada. Agente pulado é retentado: use maxRetentativasInfra 0 para evitar.',
   phases: [
-    { title: 'Preparar', detail: 'confere árvore limpa, branch e HEAD base' },
+    { title: 'Preparar', detail: 'confere árvore limpa, branch e HEAD base pelo script de estado do git' },
+    { title: 'Simplicidade', detail: 'só com spec: confere a simplicidade da SPEC; pergunta ou corte para a missão' },
+    { title: 'Planejar', detail: 'só com spec: gera o plano em milestones, que volta no retomar' },
+    { title: 'Pré-voo', detail: 'confere se o ambiente roda testes e suíte antes de qualquer commit' },
     { title: 'Contexto', detail: 'contexto do plano por área, gerado uma vez e reaproveitado na retomada' },
     { title: 'Implementar', detail: 'por feature, em série: implementa, revisão independente, commit' },
     { title: 'Validar', detail: 'confere commits, revisão + testes sobre o milestone' },
@@ -15,8 +18,10 @@ export const meta = {
 // claude-missao: núcleo genérico. Num projeto, este arquivo é gerado por `instalar.mjs` com a configuração do
 // projeto embutida em CONFIG_PROJETO; edite no repositório claude-missao, não na cópia instalada.
 //
-// args: { milestones: [{ titulo, criterio, features: [{ titulo, spec }] }], maxRodadasCorrecao?, maxProblemasPorRodada?,
-//         maxRodadasRevisao?, maxFeaturesPorMilestone?, maxRetentativasInfra?, retomar?, config? }
+// args: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } (ou plano: { milestones })
+//       ou { spec } (texto ou caminho da SPEC: a missão confere a simplicidade e gera o plano), mais
+//       maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, maxRetentativasInfra?,
+//       retomar?, config?
 // Um commit atômico por feature, só depois de revisão independente aprovada, e conferido logo em seguida: commit de
 // outra sessão no intervalo para a missão ali. A validação do milestone revisa e testa o conjunto e cria etapas de
 // correção, em loop até aprovar ou parar de progredir. Depois do último milestone,
@@ -52,6 +57,9 @@ const PADRAO = {
   // Como rodar, ao fim da missão, a suíte completa do que a missão tocou e de quem depende disso (comando ou
   // instrução; {inicio} vira o commit onde a missão começou). null: o agente descobre módulos tocados e dependentes.
   suiteCompleta: null,
+  // O que o pré-voo confere antes de qualquer commit: comandos e requisitos da suíte e dos testes (ex.: Docker vivo,
+  // WSL com pwsh para suítes só-Linux). null: o agente descobre pelo plano e pelo projeto.
+  preVoo: null,
   // Modelo do agente que só roda o script de estado do git e devolve a saída literal.
   modeloConferencia: 'haiku',
   // Modelo do agente que decide se um commit de fora da missão a impacta.
@@ -77,7 +85,7 @@ const CONFIG = { ...PADRAO, ...CONFIG_PROJETO, ...(args?.config ?? {}) }
 {
   const texto = v => v === null || typeof v === 'string'
   const erros = Object.keys(CONFIG).filter(k => !(k in PADRAO)).map(k => `chave desconhecida: ${k}`)
-  for (const k of ['regrasTestes', 'regrasProjeto', 'revisor', 'leitor', 'suiteCompleta']) if (!texto(CONFIG[k])) erros.push(`${k} deve ser texto ou null`)
+  for (const k of ['regrasTestes', 'regrasProjeto', 'revisor', 'leitor', 'suiteCompleta', 'preVoo']) if (!texto(CONFIG[k])) erros.push(`${k} deve ser texto ou null`)
   for (const k of ['formatoCommit', 'idioma', 'exemplosSkills', 'modeloConferencia', 'modeloCommitDeFora']) if (typeof CONFIG[k] !== 'string') erros.push(`${k} deve ser texto`)
   if (!Array.isArray(CONFIG.revisoresPorPasta) || !CONFIG.revisoresPorPasta.every(r => r && typeof r.prefixo === 'string' && typeof r.agentType === 'string')) {
     erros.push('revisoresPorPasta deve ser lista de { prefixo, agentType }')
@@ -200,49 +208,128 @@ const VALIDACAO = {
   required: ['aprovado', 'problemas'],
 }
 
-const planoValido = args && Array.isArray(args.milestones) && args.milestones.length > 0 &&
-  args.milestones.every(m => m && m.titulo && m.criterio && Array.isArray(m.features) && m.features.length > 0 &&
-    m.features.every(f => f && f.titulo && f.spec)) &&
-  [MAX_RODADAS_CORRECAO, MAX_PROBLEMAS_POR_RODADA, MAX_RODADAS_REVISAO, MAX_FEATURES_POR_MILESTONE].every(n => Number.isInteger(n) && n >= 1) &&
-  Number.isInteger(MAX_RETENTATIVAS_INFRA) && MAX_RETENTATIVAS_INFRA >= 0
-if (!planoValido) {
-  throw new Error('args inválido: { milestones: [{ titulo, criterio, features: [{ titulo, spec }] }], ' +
-    'maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, maxRetentativasInfra?, retomar? }, ' +
-    'sem listas vazias, limites inteiros ≥ 1 e retentativas ≥ 0')
+const SIMPLICIDADE = {
+  type: 'object',
+  properties: {
+    aprendizados: APRENDIZADOS,
+    ok: { type: 'boolean' },
+    perguntas: { type: 'array', items: { type: 'string' } },
+    cortes: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['ok', 'perguntas', 'cortes'],
 }
-const repetidosEm = lista => [...new Set(lista.filter((t, i) => lista.indexOf(t) !== i))]
-const featuresRepetidas = repetidosEm(args.milestones.flatMap(m => m.features.map(f => f.titulo)))
-if (featuresRepetidas.length) throw new Error(`títulos de feature repetidos: ${featuresRepetidas.join(', ')}`)
-const milestonesRepetidos = repetidosEm(args.milestones.map(m => m.titulo))
-if (milestonesRepetidos.length) throw new Error(`títulos de milestone repetidos: ${milestonesRepetidos.join(', ')}`)
-const grandes = args.milestones.filter(m => m.features.length > MAX_FEATURES_POR_MILESTONE)
-if (grandes.length) {
-  throw new Error(`milestones acima de ${MAX_FEATURES_POR_MILESTONE} features (divida em milestones menores ou ` +
-    `ajuste maxFeaturesPorMilestone): ${grandes.map(m => `${m.titulo} (${m.features.length})`).join(', ')}`)
+
+const PLANO = {
+  type: 'object',
+  properties: {
+    aprendizados: APRENDIZADOS,
+    milestones: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          titulo: { type: 'string' },
+          criterio: { type: 'string' },
+          caca: { type: 'array', items: { type: 'string' } },
+          userTesting: { type: 'string' },
+          features: {
+            type: 'array',
+            items: { type: 'object', properties: { titulo: { type: 'string' }, spec: { type: 'string' } }, required: ['titulo', 'spec'] },
+          },
+        },
+        required: ['titulo', 'criterio', 'features'],
+      },
+    },
+  },
+  required: ['milestones'],
+}
+
+const PRE_VOO = {
+  type: 'object',
+  properties: { aprendizados: APRENDIZADOS, ok: { type: 'boolean' }, faltando: { type: 'array', items: { type: 'string' } } },
+  required: ['ok', 'faltando'],
+}
+
+// Plano: args.milestones (ou args.plano.milestones) direto; na retomada, o que voltou em retomar.plano. Só com
+// args.spec, a missão verifica a simplicidade da SPEC e gera o plano antes de começar.
+const SPEC = typeof args?.spec === 'string' && args.spec.trim() ? args.spec.trim() : null
+const planoDado = args?.milestones ?? args?.plano?.milestones ?? args?.retomar?.plano?.milestones ?? null
+const limitesOk = [MAX_RODADAS_CORRECAO, MAX_PROBLEMAS_POR_RODADA, MAX_RODADAS_REVISAO, MAX_FEATURES_POR_MILESTONE].every(n => Number.isInteger(n) && n >= 1) &&
+  Number.isInteger(MAX_RETENTATIVAS_INFRA) && MAX_RETENTATIVAS_INFRA >= 0
+if (!args || !limitesOk || (!planoDado && !SPEC)) {
+  throw new Error('args inválido: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } ou ' +
+    '{ spec }, com maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, ' +
+    'maxRetentativasInfra?, retomar?; limites inteiros ≥ 1 e retentativas ≥ 0')
 }
 
 // A suíte completa roda uma vez ao fim, como uma etapa sem features: falha vira correção no mesmo loop.
 const SUITE = { titulo: 'Suíte final', criterio: 'a suíte completa do projeto passa', features: [], suite: true }
-if (args.milestones.some(m => m.titulo === SUITE.titulo)) throw new Error(`"${SUITE.titulo}" é reservado; renomeie o milestone`)
-const etapas = [...args.milestones, SUITE]
+const repetidosEm = lista => [...new Set(lista.filter((t, i) => lista.indexOf(t) !== i))]
+// Por que o plano não serve, ou null. Vale para o plano passado e para o gerado a partir da SPEC.
+function erroDoPlano(ms) {
+  const textos = v => Array.isArray(v) && v.every(x => typeof x === 'string' && x.trim())
+  const forma = Array.isArray(ms) && ms.length > 0 && ms.every(m => m && m.titulo && m.criterio &&
+    Array.isArray(m.features) && m.features.length > 0 && m.features.every(f => f && f.titulo && f.spec) &&
+    (m.caca === undefined || textos(m.caca)) && (m.userTesting === undefined || typeof m.userTesting === 'string'))
+  if (!forma) {
+    return 'plano inválido: milestones: [{ titulo, criterio, caca?: [áreas], userTesting?: jornada, features: [{ titulo, spec }] }], sem listas vazias'
+  }
+  const featuresRepetidas = repetidosEm(ms.flatMap(m => m.features.map(f => f.titulo)))
+  if (featuresRepetidas.length) return `títulos de feature repetidos: ${featuresRepetidas.join(', ')}`
+  const milestonesRepetidos = repetidosEm(ms.map(m => m.titulo))
+  if (milestonesRepetidos.length) return `títulos de milestone repetidos: ${milestonesRepetidos.join(', ')}`
+  const grandes = ms.filter(m => m.features.length > MAX_FEATURES_POR_MILESTONE)
+  if (grandes.length) {
+    return `milestones acima de ${MAX_FEATURES_POR_MILESTONE} features (divida em milestones menores ou ` +
+      `ajuste maxFeaturesPorMilestone): ${grandes.map(m => `${m.titulo} (${m.features.length})`).join(', ')}`
+  }
+  if (ms.some(m => m.titulo === SUITE.titulo)) return `"${SUITE.titulo}" é reservado; renomeie o milestone`
+  return null
+}
+if (planoDado) {
+  const erro = erroDoPlano(planoDado)
+  if (erro) throw new Error(erro)
+}
 
 const retomar = args.retomar ?? null
-const inicio = retomar ? etapas.findIndex(m => m.titulo === retomar.aPartirDe) : 0
-if (retomar && (inicio < 0 || typeof retomar.base !== 'string' || retomar.base.length < 7 ||
+if (retomar && (!planoDado || ![...planoDado, SUITE].some(m => m.titulo === retomar.aPartirDe) ||
+  typeof retomar.base !== 'string' || retomar.base.length < 7 ||
   typeof retomar.head !== 'string' || retomar.head.length < 7 || !Array.isArray(retomar.commits) ||
   (retomar.concluidas !== undefined && !Array.isArray(retomar.concluidas)) ||
   (retomar.inicioMissao !== undefined && (typeof retomar.inicioMissao !== 'string' || retomar.inicioMissao.length < 7)))) {
-  throw new Error('args.retomar inválido: use o objeto `retomar` devolvido pela execução que parou ({ aPartirDe, inicioMissao, base, head, commits, concluidas })')
+  throw new Error('args.retomar inválido: use o objeto `retomar` devolvido pela execução que parou ({ aPartirDe, inicioMissao, base, head, commits, concluidas, plano, contexto })')
 }
-const pendentes = etapas.slice(inicio)
-if (inicio > 0) log(`Retomando em "${retomar.aPartirDe}": ${inicio} etapas anteriores já entregues`)
 
-const totalFeatures = pendentes.reduce((n, m) => n + m.features.length, 0)
-const milestonesPendentes = pendentes.filter(m => !m.suite).length
-// por feature: worker, revisão, commit e conferência; por milestone: 2 conferências + 2 validadores;
-// suíte final: 2 conferências + 1 validador
-const estimativa = 2 + 4 * totalFeatures + 4 * milestonesPendentes + 3
-log(`Estimativa mínima: ${estimativa} agentes (sem contar correções e retentativas)`)
+// Contexto da missão: áreas do plano (hidratação, gerada uma vez) e aprendizados dos workers. Volta no retomar.
+const contexto = { areas: [], aprendizados: [] }
+if (retomar?.contexto) {
+  const lista = v => (Array.isArray(v) ? v : [])
+  contexto.areas = lista(retomar.contexto.areas)
+  contexto.aprendizados.push(...lista(retomar.contexto.aprendizados).filter(a => typeof a === 'string'))
+}
+function aprender(r) {
+  for (const a of Array.isArray(r?.aprendizados) ? r.aprendizados : []) {
+    const t = typeof a === 'string' ? a.trim() : ''
+    if (t && !contexto.aprendizados.includes(t)) contexto.aprendizados.push(t)
+  }
+  return r
+}
+// Agente que trabalha, revisa ou valida: o que ele aprende entra no contexto dos próximos prompts.
+const trabalhar = async (prompt, opt) => aprender(await agent(prompt, opt))
+const APRENDER = 'Se descobrir um fato não óbvio do projeto que ajude as próximas etapas (ex.: "o serviço X devolve ' +
+  '404 sem acesso", "rode os testes com forks=1"), devolva-o em aprendizados, numa frase cada.'
+
+// Prompt de etapa = técnica da etapa (etapas/<etapa>.md, embutida pelo instalador) + trecho pertinente do contexto do
+// plano + aprendizados + a tarefa.
+function montar(etapa, tarefa, areas = []) {
+  const partes = []
+  if (ETAPAS[etapa]) partes.push(`Técnica da etapa ${etapa} (orientação; regras do repo prevalecem):\n${ETAPAS[etapa]}`)
+  if (areas.length) partes.push('Contexto do plano (orientação; regras do repo prevalecem):\n' + areas.map(s => `### ${s.nome}\n${s.guia}`).join('\n\n'))
+  if (contexto.aprendizados.length) partes.push(`Aprendizados desta missão:\n- ${contexto.aprendizados.join('\n- ')}`)
+  const final = `${tarefa}\n${APRENDER}`
+  return partes.length ? `${partes.join('\n\n')}\n\nSe algo acima contrariar as proibições da tarefa, as proibições vencem.\n\n${final}` : final
+}
+const SPEC_NO_PROMPT = () => `SPEC (texto, ou caminho de arquivo no repositório para ler inteiro):\n${SPEC}`
 
 // agent() devolve null quando o modelo/API cai; nas Missions da Factory quase toda falha de worker foi assim.
 // antesDeRetentar confirma que repetir é seguro; se não for, devolve { semRetentativa: estado }.
@@ -280,20 +367,86 @@ if (retomar && !retomar.inicioMissao) {
   log(`retomar sem inicioMissao: a suíte final vai cobrir só a partir de ${retomar.base}, não a missão inteira`)
 }
 
-// Hidratação, como a Factory: o contexto do plano (guias por área, montados a partir do código atual) é gerado UMA vez
-// por missão e volta no `retomar`; a retomada o reaproveita, junto com os aprendizados, em vez de regenerá-lo.
-phase('Contexto')
+// Só com a SPEC: antes de qualquer código, confere a simplicidade e gera o plano. Pergunta ou corte sugerido para a
+// missão e volta tudo junto para o usuário decidir.
+let milestones = planoDado
+if (!milestones) {
+  phase('Simplicidade')
+  const s = await comRetentativa('simplicidade', () => trabalhar(montar('verificar-simplicidade',
+    `${SPEC_NO_PROMPT()}\n\nLeia a SPEC e o código que ela toca e confira a simplicidade dela. Devolva em perguntas o ` +
+    'que precisa de decisão do usuário e em cortes o que sugere tirar ou trocar por algo mais simples, cada item com ' +
+    'o motivo e a evidência no código. Sem perguntas nem cortes, ok=true. Não escreva arquivos nem rode build: só ' +
+    'leitura.\n' + GIT_PROIBIDO),
+    { label: 'simplicidade', phase: 'Simplicidade', agentType: comoAgente(CONFIG.leitor), schema: SIMPLICIDADE },
+  ))
+  if (!s) return { parouEm: 'simplicidade', motivo: 'o agente que verifica a simplicidade não respondeu', aprendizados: contexto.aprendizados }
+  if (!s.ok || s.perguntas.length || s.cortes.length) {
+    return {
+      parouEm: 'simplicidade',
+      motivo: 'a verificação de simplicidade trouxe perguntas ou cortes: decida, ajuste a SPEC e rode de novo (nenhum código foi escrito)',
+      perguntas: s.perguntas, cortes: s.cortes, aprendizados: contexto.aprendizados,
+    }
+  }
+  phase('Planejar')
+  const p = await comRetentativa('planejar', () => trabalhar(montar('planejar',
+    `${SPEC_NO_PROMPT()}\n\nA SPEC foi aprovada. Leia-a e o código que ela toca e gere o plano: milestones com titulo, ` +
+    `criterio verificável, caca (áreas de caça-bug do milestone), userTesting (a jornada, só se houver uma que um ` +
+    `usuário percorre; senão omita) e features com titulo único e spec. No máximo ${MAX_FEATURES_POR_MILESTONE} ` +
+    `features por milestone; o título "${SUITE.titulo}" é reservado. Não escreva arquivos nem rode build: só leitura.\n` +
+    GIT_PROIBIDO),
+    { label: 'planejar', phase: 'Planejar', agentType: comoAgente(CONFIG.leitor), schema: PLANO },
+  ))
+  // Campo opcional vazio conta como ausente.
+  const gerado = p?.milestones?.map(m => ({ ...m, caca: m.caca?.length ? m.caca : undefined, userTesting: m.userTesting?.trim() || undefined }))
+  const erro = gerado ? erroDoPlano(gerado) : 'o agente de planejamento não respondeu'
+  if (erro) return { parouEm: 'planejar', motivo: `plano gerado não serve: ${erro}`, plano: p ?? null, aprendizados: contexto.aprendizados }
+  milestones = JSON.parse(JSON.stringify(gerado))
+  log(`Plano gerado: ${milestones.length} milestones, ${milestones.reduce((n, m) => n + m.features.length, 0)} features`)
+}
+
+const etapas = [...milestones, SUITE]
+const inicio = retomar ? etapas.findIndex(m => m.titulo === retomar.aPartirDe) : 0
+const pendentes = etapas.slice(inicio)
+if (inicio > 0) log(`Retomando em "${retomar.aPartirDe}": ${inicio} etapas anteriores já entregues`)
 const planoTexto = pendentes.filter(m => !m.suite).map(m =>
   `## ${m.titulo} (critério: ${m.criterio})\n` + m.features.map(f => `- ${f.titulo}: ${f.spec}`).join('\n'),
 ).join('\n\n')
-const contexto = await (async () => {
-  const lista = v => (Array.isArray(v) ? v : [])
-  if (retomar?.contexto) {
-    log('Contexto do plano reaproveitado da execução anterior')
-    return { areas: lista(retomar.contexto.areas), aprendizados: lista(retomar.contexto.aprendizados).filter(a => typeof a === 'string') }
-  }
-  // Retomando só a suíte final, sem contexto anterior, não há feature a guiar.
-  const gerado = !planoTexto ? null : await comRetentativa('contexto do plano', () => agent(
+
+const totalFeatures = pendentes.reduce((n, m) => n + m.features.length, 0)
+const milestonesPendentes = pendentes.filter(m => !m.suite).length
+// preparo, pré-voo e contexto (se não veio do retomar); por feature: worker, revisão, commit e conferência; por
+// milestone: 2 conferências + 2 validadores; suíte final: 2 conferências + 1 validador
+const estimativa = 2 + (retomar?.contexto ? 0 : 1) + 4 * totalFeatures + 4 * milestonesPendentes + 3
+log(`Estimativa mínima: ${estimativa} agentes a partir daqui (sem contar correções e retentativas)`)
+
+const relatorio = []
+
+// Antes de qualquer commit: o ambiente roda o que a suíte e os testes vão precisar? Roda também na retomada.
+phase('Pré-voo')
+const preVoo = await comRetentativa('pré-voo', () => trabalhar(montar('pre-voo',
+  'Confira se o ambiente roda o que esta missão vai precisar para os testes focados e a suíte final' +
+  (CONFIG.preVoo ? `: ${CONFIG.preVoo}` : ': descubra pelo plano abaixo e pelo projeto os runners de teste, build e serviços de apoio') +
+  `.\nNão altere código nem arquivos versionados. ${SAIDA_EM_ARQUIVO}\n` +
+  'Devolva ok=true só se tudo o que a missão vai usar funciona; senão, em faltando, cada item que falta, com como ' +
+  `conferir e como resolver.\n${GIT_PROIBIDO}\n\n${planoTexto}`),
+  { label: 'pré-voo', phase: 'Pré-voo', schema: PRE_VOO },
+))
+if (!preVoo || !preVoo.ok) {
+  const motivo = preVoo
+    ? `o ambiente não está pronto: ${preVoo.faltando.join(' | ') || 'sem detalhe'}. Ajuste o ambiente e rode de novo`
+    : 'o agente de pré-voo não respondeu'
+  // Parada antes de qualquer commit: devolve o retomar recebido ou um que recomeça no primeiro milestone.
+  const r = retomar ?? parar(pendentes[0], head, [], [], {}).retomar
+  return { parouEm: 'pré-voo', motivo, faltando: preVoo?.faltando ?? [], plano: { milestones }, contexto, aprendizados: contexto.aprendizados, retomar: r }
+}
+
+// Hidratação, como a Factory: o contexto do plano (guias por área, montados a partir do código atual) é gerado UMA vez
+// por missão e volta no `retomar`; a retomada o reaproveita, junto com os aprendizados, em vez de regenerá-lo.
+phase('Contexto')
+if (retomar?.contexto) {
+  log('Contexto do plano reaproveitado da execução anterior')
+} else if (planoTexto) {
+  const gerado = await comRetentativa('contexto do plano', () => agent(
     'Você prepara o contexto do plano desta missão. Leia o plano abaixo e o código que ele toca. Agrupe as features ' +
     `por área de trabalho (ex.: ${CONFIG.exemplosSkills}) e escreva um guia curto por área: arquivos-modelo do repo ` +
     'para copiar o padrão, onde cada peça mora, comando do teste focado e armadilhas já visíveis no código. Cite ' +
@@ -302,35 +455,12 @@ const contexto = await (async () => {
     GIT_PROIBIDO + '\n\n' + planoTexto,
     { label: 'contexto do plano', phase: 'Contexto', agentType: comoAgente(CONFIG.leitor), schema: CONTEXTO },
   ))
-  return { areas: gerado?.areas ?? [], aprendizados: [] }
-})()
+  contexto.areas = gerado?.areas ?? []
+}
 const guiaPorFeature = new Map()
 for (const s of contexto.areas) for (const t of s.features ?? []) if (!guiaPorFeature.has(t)) guiaPorFeature.set(t, s)
 const semArea = pendentes.flatMap(m => m.features).filter(f => !guiaPorFeature.has(f.titulo)).map(f => f.titulo)
 log(`${contexto.areas.length} áreas no contexto do plano${semArea.length ? `; sem área: ${semArea.join(', ')}` : ''}`)
-
-function aprender(r) {
-  for (const a of Array.isArray(r?.aprendizados) ? r.aprendizados : []) {
-    const t = typeof a === 'string' ? a.trim() : ''
-    if (t && !contexto.aprendizados.includes(t)) contexto.aprendizados.push(t)
-  }
-  return r
-}
-// Agente que trabalha, revisa ou valida: o que ele aprende entra no contexto dos próximos prompts.
-const trabalhar = async (prompt, opt) => aprender(await agent(prompt, opt))
-const APRENDER = 'Se descobrir um fato não óbvio do projeto que ajude as próximas etapas (ex.: "o serviço X devolve ' +
-  '404 sem acesso", "rode os testes com forks=1"), devolva-o em aprendizados, numa frase cada.'
-
-// Prompt de etapa = técnica da etapa (etapas/<etapa>.md, embutida pelo instalador) + trecho pertinente do contexto do
-// plano + aprendizados + a tarefa.
-function montar(etapa, tarefa, areas = []) {
-  const partes = []
-  if (ETAPAS[etapa]) partes.push(`Técnica da etapa ${etapa} (orientação; regras do repo prevalecem):\n${ETAPAS[etapa]}`)
-  if (areas.length) partes.push('Contexto do plano (orientação; regras do repo prevalecem):\n' + areas.map(s => `### ${s.nome}\n${s.guia}`).join('\n\n'))
-  if (contexto.aprendizados.length) partes.push(`Aprendizados desta missão:\n- ${contexto.aprendizados.join('\n- ')}`)
-  const final = `${tarefa}\n${APRENDER}`
-  return partes.length ? `${partes.join('\n\n')}\n\nSe algo acima contrariar as proibições da tarefa, as proibições vencem.\n\n${final}` : final
-}
 
 const mesmoSha = (a, b) => !!a && !!b && a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a))
 
@@ -737,8 +867,6 @@ async function validar(m, base, arquivos, anteriores) {
   return { aprovado, problemas }
 }
 
-const relatorio = []
-
 // Correção e validação podem tocar qualquer parte do milestone: recebem todas as áreas dele. Na suíte final a falha
 // pode estar em qualquer parte da missão: todas as áreas.
 function guiasDe(m) {
@@ -751,8 +879,8 @@ function guiasDe(m) {
 function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
-    parouEm: m.titulo, ...extra, contexto, aprendizados: contexto.aprendizados,
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, contexto },
+    parouEm: m.titulo, ...extra, plano: { milestones }, contexto, aprendizados: contexto.aprendizados,
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -847,4 +975,4 @@ for (const [i, m] of pendentes.entries()) {
   relatorio.push({ milestone: m.titulo, aprovado: true, rodadasCorrecao: rodada, commits: `${base}..${head}`, features: feitas })
 }
 
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, contexto, aprendizados: contexto.aprendizados, relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, contexto, aprendizados: contexto.aprendizados, relatorio }

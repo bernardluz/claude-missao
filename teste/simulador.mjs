@@ -40,7 +40,10 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   arquivosDeFora     arquivos dos commits que não são da missão (padrão ['z/fora.js'])
 //   areas              áreas que o agente do contexto do plano devolve
 //   aprendizados       { [label]: [textos] } aprendizados que esse agente devolve
-//   foraImpacta       resposta do agente que julga commit de fora (padrão true: para como antes)
+//   perguntas, cortes  o que a verificação de simplicidade devolve (qualquer um deles faz a missão parar)
+//   planoGerado        milestones que o agente de planejamento devolve (padrão: os de plano())
+//   preVooFalta        [itens] o pré-voo acusa o que falta no ambiente
+//   foraImpacta      resposta do agente que julga commit de fora (padrão true: para como antes)
 //   conferenciaInvalida vezes que o agente de conferência devolve texto em vez da saída do git-estado.mjs
 export const DUMP = 'bash.exe.stackdump'
 export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0000'], sujo: false }) {
@@ -83,6 +86,9 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     }
     if (l === 'commit de fora') return { impacta: o.foraImpacta ?? true, motivo: 'julgado pelo agente' }
     if (l === 'contexto do plano') return { areas: o.areas ?? [] }
+    if (l === 'simplicidade') return { ok: !o.perguntas && !o.cortes, perguntas: o.perguntas ?? [], cortes: o.cortes ?? [] }
+    if (l === 'planejar') return { milestones: o.planoGerado ?? plano().milestones }
+    if (l === 'pré-voo') return { ok: !o.preVooFalta, faltando: o.preVooFalta ?? [] }
     if (l === 'preparo' || l === 'conferência') {
       if (invalida > 0) { invalida--; return { saida: 'o repositório tem 3 commits novos e está limpo' } }
       // Como o git-estado.mjs: `HEAD` como base dá intervalo vazio.
