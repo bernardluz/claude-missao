@@ -662,7 +662,7 @@ describe('etapas, contexto do plano e aprendizados', () => {
     const p1 = await rodar(plano(), { aprendizados, validacao: [0, 2, 2] }, estado)
     assert.doesNotMatch(p1.prompt('F1'), /Aprendizados desta missão/)
     assert.match(p1.prompt('F2'), /Aprendizados desta missão:\n- rode com forks=1/)
-    assert.match(p1.prompt('F1'), /devolva-o em aprendizados/)
+    assert.match(p1.prompt('F1'), /Em aprendizados, devolva só técnica ou armadilha durável.*Nunca estado do momento: HEAD, contagem de testes/)
     assert.deepEqual(p1.resultado.aprendizados, ['rode com forks=1', 'o Banking devolve 404 sem acesso'])
     assert.deepEqual(p1.resultado.retomar.contexto.aprendizados, p1.resultado.aprendizados)
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
@@ -1050,5 +1050,29 @@ describe('aprendizados do projeto embutidos', () => {
   test('sem aprendizados.md, nenhuma seção', async () => {
     const r = await comAprendizados('', plano())
     assert.doesNotMatch(r.prompt('F1'), /Aprendizados do projeto/)
+  })
+})
+
+describe('filtro de aprendizados da execução', () => {
+  const comAprendizados = (texto, args, opcoes) =>
+    executar(gerar(readFileSync(NUCLEO, 'utf8'), {}, '', lerEtapas(), texto).replace('export const meta', 'const meta'), args, opcoes)
+
+  test('no máximo 3 por agente, sem duplicados e sem o que já está no aprendizados.md embutido', async () => {
+    const r = await comAprendizados('- Rode os testes com forks=1.\n- Docker precisa estar vivo.', plano(), {
+      aprendizados: {
+        F1: ['a1', 'a2', 'rode os testes com forks=1', 'a4 descartado pelo limite'],
+        F2: ['a1', 'A2.', 'b1'],
+      },
+    })
+    assert.equal(r.resultado.concluido, true)
+    // F1: só os 3 primeiros contam, e o terceiro já está no projeto. F2: a1 e A2. repetem.
+    assert.deepEqual(r.resultado.aprendizados, ['a1', 'a2', 'b1'])
+    assert.equal(r.resultado.sugestaoAprendizados, '- a1\n- a2\n- b1\n')
+    assert.ok(r.logs.includes('1 aprendizado(s) acima do limite de 3 por agente descartado(s)'))
+  })
+
+  test('sem aprendizados, sem sugestão', async () => {
+    const r = await rodar(plano())
+    assert.equal(r.resultado.sugestaoAprendizados, null)
   })
 })

@@ -155,7 +155,7 @@ const RESULTADO_FEATURE = {
     jaResolvido: { type: 'boolean' },
     arquivos: { type: 'array', items: { type: 'string' } },
     resumo: { type: 'string' },
-    aprendizados: { type: 'array', items: { type: 'string' } },
+    aprendizados: { type: 'array', items: { type: 'string' }, maxItems: 3 },
     testesRodados: { type: 'array', items: { type: 'string' } },
   },
   required: ['concluida', 'resumo'],
@@ -184,7 +184,7 @@ const causaGit = () => (erroGit ? `; última saída de ${GIT_ESTADO}: ${erroGit}
 const SAIDA = { type: 'object', properties: { saida: { type: 'string' } }, required: ['saida'] }
 
 // Todo worker pode devolver fatos não óbvios que descobriu; eles se acumulam no contexto da missão.
-const APRENDIZADOS = { type: 'array', items: { type: 'string' } }
+const APRENDIZADOS = { type: 'array', items: { type: 'string' }, maxItems: 3 }
 
 const CONTEXTO = {
   type: 'object',
@@ -325,17 +325,31 @@ if (retomar?.contexto) {
   contexto.areas = lista(retomar.contexto.areas)
   contexto.aprendizados.push(...lista(retomar.contexto.aprendizados).filter(a => typeof a === 'string'))
 }
+// Aprendizado é técnica ou armadilha durável; o filtro barra excesso e repetição, o prompt barra estado do momento.
+const MAX_APRENDIZADOS_POR_WORKER = 3
+const normalizarAprendizado = t => t.toLowerCase().replace(/^[-*]\s*/, '').replace(/[\s.;:]+$/, '').trim()
+const jaNoProjeto = new Set(APRENDIZADOS_PROJETO.split('\n').map(normalizarAprendizado).filter(Boolean))
 function aprender(r) {
-  for (const a of Array.isArray(r?.aprendizados) ? r.aprendizados : []) {
-    const t = typeof a === 'string' ? a.trim() : ''
-    if (t && !contexto.aprendizados.includes(t)) contexto.aprendizados.push(t)
+  const novos = (Array.isArray(r?.aprendizados) ? r.aprendizados : [])
+    .map(a => (typeof a === 'string' ? a.trim() : '')).filter(Boolean)
+  if (novos.length > MAX_APRENDIZADOS_POR_WORKER) {
+    log(`${novos.length - MAX_APRENDIZADOS_POR_WORKER} aprendizado(s) acima do limite de ${MAX_APRENDIZADOS_POR_WORKER} por agente descartado(s)`)
+  }
+  for (const t of novos.slice(0, MAX_APRENDIZADOS_POR_WORKER)) {
+    const n = normalizarAprendizado(t)
+    if (jaNoProjeto.has(n) || contexto.aprendizados.some(a => normalizarAprendizado(a) === n)) continue
+    contexto.aprendizados.push(t)
   }
   return r
 }
+// Texto pronto para o agente pai revisar e acrescentar ao .claude/missao/aprendizados.md do projeto.
+const sugestaoAprendizados = () => (contexto.aprendizados.length ? `${contexto.aprendizados.map(a => `- ${a}`).join('\n')}\n` : null)
 // Agente que trabalha, revisa ou valida: o que ele aprende entra no contexto dos próximos prompts.
 const trabalhar = async (prompt, opt) => aprender(await agent(prompt, opt))
-const APRENDER = 'Se descobrir um fato não óbvio do projeto que ajude as próximas etapas (ex.: "o serviço X devolve ' +
-  '404 sem acesso", "rode os testes com forks=1"), devolva-o em aprendizados, numa frase cada.'
+const APRENDER = `Em aprendizados, devolva só técnica ou armadilha durável, que valha para a próxima missão (comando ` +
+  '"rode os testes com forks=1", limite de ferramenta, comportamento não óbvio de outro serviço como "o serviço X ' +
+  'devolve 404 sem acesso"), numa frase cada. Nunca estado do momento: HEAD, contagem de testes, "já está feito", ' +
+  `resultado desta rodada. No máximo ${MAX_APRENDIZADOS_POR_WORKER}; sem nada durável, lista vazia.`
 
 // Prompt de etapa = técnica da etapa (etapas/<etapa>.md, embutida pelo instalador) + trecho pertinente do contexto do
 // plano + aprendizados + a tarefa.
@@ -1102,6 +1116,7 @@ function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
     parouEm: m.titulo, ...extra, plano: { milestones }, contexto, aprendizados: contexto.aprendizados,
+    sugestaoAprendizados: sugestaoAprendizados(),
     retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
@@ -1289,4 +1304,4 @@ for (const [i, m] of pendentes.entries()) {
   relatorio.push({ milestone: m.titulo, aprovado: true, rodadasCorrecao: rodada, commits: `${base}..${head}`, features: feitas })
 }
 
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, contexto, aprendizados: contexto.aprendizados, relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
