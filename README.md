@@ -98,6 +98,23 @@ cortes explícitos e critérios de aceite verificáveis.
   commits de fora aceitos (`deFora`), os bugs corrigidos pela caça (`bugsCorrigidos`) e se a caça final já rodou
   (`cacaFinalFeita`). Na retomada, os arquivos que a missão já tocou vêm do git.
 
+## Modo enxugar
+
+Para pegar um código que já existe e cortá-lo ao modelo mínimo, com os mesmos processos da missão:
+
+1. **Na conversa**, o agente principal usa a skill `enxugar-codigo`: radiografia medida do alvo (linhas, tabelas,
+   filas, jobs, estados, rotas, testes), uso real de cada peça, peso x valor, e as decisões do usuário uma por vez.
+2. **SPEC**, no formato da `criar-spec-simples`, com `<!-- modo: enxugar -->` na primeira linha e as seções
+   "Estado atual (medido)", "Modelo alvo", "O que sai", "Consumidores que mudam junto" e "Estratégia de corte"
+   (reconstruir do zero x cirurgia, hardcut x migration de avanço, ordem de deploy).
+3. **Missão** com `{ "spec": "<caminho>", "modo": "enxugar" }`. As etapas com complemento
+   `etapas/<etapa>.enxugar.md` (simplicidade, planejar, pré-voo, contrato, implementar, caça bug e aceite) recebem a
+   técnica ajustada para código existente. O pré-voo mede o alvo no início, o aceite mede do mesmo jeito no fim, e o
+   resultado traz `medicao: { antes, depois }` para a tabela antes x depois da SPEC.
+
+Referência: um serviço financeiro saiu de 23 mil linhas, 34 tabelas e 6 fluxos de mensageria para 3,8 mil linhas,
+6 tabelas e nenhuma fila.
+
 ## Instalar num projeto
 
 1. **Opcional:** crie `.claude/missao.config.json` no projeto. Veja [configuração](#configuração)
@@ -111,7 +128,7 @@ cortes explícitos e critérios de aceite verificáveis.
    Isso grava no projeto:
    - `.claude/workflows/missao.js`, com a configuração e a técnica de cada etapa embutidas;
    - `.claude/missao/git-estado.mjs`, o script que a conferência roda;
-   - as skills `.claude/skills/missao-traycer/` e `.claude/skills/criar-spec-simples/`.
+   - as skills `.claude/skills/missao-traycer/`, `.claude/skills/criar-spec-simples/` e `.claude/skills/enxugar-codigo/`.
 
    Versione esses arquivos e a configuração no projeto. O complemento das etapas, se houver, fica em
    `.claude/missao/etapas/`.
@@ -178,6 +195,7 @@ descartável `missao-teste/`.
 | `plano` | — | `{ milestones }`, o mesmo que `milestones` |
 | `aceite` | — | Critérios de aceite. Sem eles, a seção de aceite da SPEC ou os critérios dos milestones |
 | `maxRodadasCaca` | 3 | Teto de rodadas de caça bug por milestone |
+| `modo` | — | `"enxugar"` para cortar código que já existe (também ligado pelo marcador `<!-- modo: enxugar -->` na SPEC em texto) |
 | `maxFeaturesPorMilestone` | 8 | Plano com milestone maior é recusado; divida-o |
 | `maxRodadasRevisao` | 3 | Rodadas de ajuste por feature antes de parar |
 | `maxRodadasCorrecao` | 5 | Teto do loop validar/corrigir por milestone |
