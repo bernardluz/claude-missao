@@ -1,7 +1,7 @@
 // Instala o workflow missao num projeto.
 // Lê <projeto>/.claude/missao.config.json (opcional) e gera <projeto>/.claude/workflows/missao.js
 // com a configuração embutida em CONFIG_PROJETO. Copia também, sem alterar, os arquivos de COPIAS: a skill
-// missao-traycer (lê a configuração do projeto ao rodar), a skill criar-spec-simples e o script de estado do git que a
+// missao-traycer (lê a configuração do projeto ao rodar), as skills criar-spec-simples e enxugar-codigo e o script de estado do git que a
 // conferência roda. Embute a técnica de cada etapa (etapas/ + .claude/missao/etapas/ do projeto) em ETAPAS e os
 // aprendizados do projeto (.claude/missao/aprendizados.md) em APRENDIZADOS_PROJETO.
 //
@@ -22,6 +22,7 @@ export const SKILL = join(aqui, 'skills', 'missao-traycer', 'SKILL.md')
 export const COPIAS = [
   [SKILL, '.claude/skills/missao-traycer/SKILL.md'],
   [join(aqui, 'skills', 'criar-spec-simples', 'SKILL.md'), '.claude/skills/criar-spec-simples/SKILL.md'],
+  [join(aqui, 'skills', 'enxugar-codigo', 'SKILL.md'), '.claude/skills/enxugar-codigo/SKILL.md'],
   [join(aqui, 'git-estado.mjs'), '.claude/missao/git-estado.mjs'],
 ]
 const MARCA_COPIA = '`claude-missao`'

@@ -152,7 +152,7 @@ test('embute a técnica de cada etapa; o projeto complementa ou substitui, e eta
   writeFileSync(join(dir, 'implementar.md'), 'Use o Maven wrapper.\n')
   writeFileSync(join(dir, 'aceite.md'), '<!-- substitui -->\nSó o do projeto.\n')
   const etapas = lerEtapas(raiz)
-  assert.deepEqual(Object.keys(etapas), ['aceite', 'caca-bug', 'corrigir', 'implementar', 'planejar', 'pre-voo',
+  assert.deepEqual(Object.keys(etapas).filter(k => !k.endsWith('.enxugar')), ['aceite', 'caca-bug', 'corrigir', 'implementar', 'planejar', 'pre-voo',
     'prova-de-contrato', 'revisar', 'scrutiny', 'user-testing', 'verificar-simplicidade'])
   const nucleoImplementar = readFileSync(join(ETAPAS_DIR, 'implementar.md'), 'utf8').replace(/\r\n/g, '\n').trim()
   assert.equal(etapas.implementar, `${nucleoImplementar}\n\nDo projeto:\nUse o Maven wrapper.`)
@@ -266,4 +266,17 @@ test('aprendizados.md acima de 60 linhas gera aviso, sem falhar a instalação',
   const cli = spawnSync('node', [NUCLEO.replace(/missao\.js$/, 'instalar.mjs'), raiz], { encoding: 'utf8' })
   assert.equal(cli.status, 0)
   assert.match(cli.stderr, /^aviso: .*tem 61 linhas/m)
+})
+
+test('instala a skill enxugar-codigo e embute os complementos .enxugar das etapas', () => {
+  const raiz = projetoTemporario()
+  const { destino } = instalar(raiz)
+  const skill = readFileSync(join(raiz, '.claude', 'skills', 'enxugar-codigo', 'SKILL.md'), 'utf8')
+  assert.match(skill, /^---\nname: enxugar-codigo\n/)
+  assert.match(skill, /Instalada pelo `claude-missao`/)
+  assert.match(skill, /<!-- modo: enxugar -->/)
+  const etapas = lerEtapas(raiz)
+  assert.deepEqual(Object.keys(etapas).filter(k => k.endsWith('.enxugar')), ['aceite.enxugar', 'caca-bug.enxugar',
+    'implementar.enxugar', 'planejar.enxugar', 'pre-voo.enxugar', 'prova-de-contrato.enxugar', 'verificar-simplicidade.enxugar'])
+  assert.ok(readFileSync(destino, 'utf8').includes(JSON.stringify(etapas['implementar.enxugar'])))
 })
