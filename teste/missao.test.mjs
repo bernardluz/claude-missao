@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { executar, carregar, plano, DUMP } from './simulador.mjs'
+import { executar, carregar, plano, DUMP, MEDICAO_ANTES, MEDICAO_DEPOIS } from './simulador.mjs'
 import { readFileSync } from 'node:fs'
 import { NUCLEO, gerar, lerEtapas } from '../instalar.mjs'
 
@@ -1128,5 +1128,51 @@ describe('aprendizados nas paradas e na retomada', () => {
     assert.equal(p2.resultado.concluido, true)
     assert.deepEqual(p2.resultado.aprendizados, ['b1'])
     assert.equal(p2.resultado.sugestaoAprendizados, '- b1\n')
+  })
+})
+
+describe('modo enxugar', () => {
+  const COMPLEMENTOS = [
+    ['simplicidade', 'verificar-simplicidade'], ['planejar', 'planejar'], ['pré-voo', 'pre-voo'], ['contrato: M1', 'prova-de-contrato'],
+    ['F1', 'implementar'], ['caça: geral (M1, rodada 1)', 'caca-bug'], ['verificação 1: achado 1 (M1, rodada 1)', 'caca-bug'],
+    ['aceite', 'aceite'],
+  ]
+  const primeiraLinha = nome => readFileSync(new URL(`../etapas/${nome}.enxugar.md`, import.meta.url), 'utf8').split('\n')[0]
+
+  test('com modo enxugar, cada etapa com complemento o recebe; o aceite devolve a medição antes x depois', async () => {
+    const r = await rodarCom({}, { spec: 'docs/enxugar.md', modo: 'enxugar' }, { caca: { M1: [1] } })
+    assert.equal(r.resultado.concluido, true)
+    for (const [label, etapa] of COMPLEMENTOS) {
+      assert.ok(r.prompt(label).includes(`Modo enxugar (código existente):\n${primeiraLinha(etapa)}`), label)
+    }
+    assert.doesNotMatch(r.prompt('revisão: F1'), /Modo enxugar/)
+    assert.match(r.prompt('pré-voo'), /devolva em medicao/)
+    assert.match(r.prompt('aceite'), /Meça do mesmo jeito que no início: \{"linhas":23000/)
+    assert.equal(r.resultado.modo, 'enxugar')
+    assert.deepEqual(r.resultado.medicao, { antes: MEDICAO_ANTES, depois: MEDICAO_DEPOIS })
+  })
+
+  test('sem o modo, nenhum complemento nem medição', async () => {
+    const r = await rodarCom({}, { spec: 'docs/spec.md' }, { caca: { M1: [1] } })
+    assert.equal(r.resultado.concluido, true)
+    for (const [label] of COMPLEMENTOS) assert.doesNotMatch(r.prompt(label), /Modo enxugar/, label)
+    assert.doesNotMatch(r.prompt('pré-voo'), /devolva em medicao/)
+    assert.equal(r.resultado.medicao, undefined)
+  })
+
+  test('o marcador na SPEC em texto liga o modo; a retomada preserva modo e medição inicial', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodarCom({}, { spec: '<!-- modo: enxugar -->\n# Enxugar o Financial' }, { suite: [2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'Suíte final')
+    assert.equal(p1.resultado.retomar.modo, 'enxugar')
+    assert.deepEqual(p1.resultado.retomar.medicaoAntes, MEDICAO_ANTES)
+    const p2 = await rodarCom({}, { spec: 'x', retomar: p1.resultado.retomar }, {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.doesNotMatch(p2.prompt('pré-voo'), /devolva em medicao/)
+    assert.deepEqual(p2.resultado.medicao, { antes: MEDICAO_ANTES, depois: MEDICAO_DEPOIS })
+  })
+
+  test('modo desconhecido é recusado', async () => {
+    await assert.rejects(rodar(plano({ modo: 'outro' })), /args inválido/)
   })
 })

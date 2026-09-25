@@ -57,6 +57,8 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   conferenciaComCerca o agente de conferência devolve o JSON dentro de cerca de código
 //   conferenciaInvalida vezes que o agente de conferência devolve texto em vez da saída do git-estado.mjs
 export const DUMP = 'bash.exe.stackdump'
+export const MEDICAO_ANTES = { linhas: 23000, tabelas: 34, filas: 6, arquivos: 410, testes: 120, comandos: 'git ls-files | wc -l' }
+export const MEDICAO_DEPOIS = { linhas: 3800, tabelas: 6, filas: 0, arquivos: 60, testes: 40, comandos: 'git ls-files | wc -l' }
 export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0000'], sujo: false }) {
   const o = opcoes
   estado.dumps ??= []
@@ -103,7 +105,9 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (l === 'contexto do plano') return { areas: o.areas ?? [] }
     if (l === 'simplicidade') return { ok: !o.perguntas && !o.cortes, perguntas: o.perguntas ?? [], cortes: o.cortes ?? [] }
     if (l === 'planejar') return { milestones: o.planoGerado ?? plano().milestones }
-    if (l === 'pré-voo') return { ok: !o.preVooFalta, faltando: o.preVooFalta ?? [] }
+    // Quando o prompt pede a medição (modo enxugar), o pré-voo mede o antes e o aceite, o depois.
+    const pedeMedicao = /devolva em medicao/.test(prompt)
+    if (l === 'pré-voo') return { ok: !o.preVooFalta, faltando: o.preVooFalta ?? [], ...(pedeMedicao ? { medicao: MEDICAO_ANTES } : {}) }
     if (l === 'preparo' || l === 'conferência') {
       if (o.conferenciaErro) return { saida: o.conferenciaErro }
       if (invalida > 0) { invalida--; return { saida: 'o repositório tem 3 commits novos e está limpo' } }
@@ -156,7 +160,8 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (l === 'aceite') {
       const n = (o.aceiteFalta ?? [])[rodadaAceite++] ?? 0
       return { criterios: [{ criterio: 'c ok', evidencia: 'teste T passou', atendido: true },
-        ...Array.from({ length: n }, (_, i) => ({ criterio: `c${i + 1}`, evidencia: 'sem teste', atendido: false }))] }
+        ...Array.from({ length: n }, (_, i) => ({ criterio: `c${i + 1}`, evidencia: 'sem teste', atendido: false }))],
+        ...(pedeMedicao ? { medicao: MEDICAO_DEPOIS } : {}) }
     }
     if (l.startsWith('user testing: ')) {
       const m = l.slice(14)

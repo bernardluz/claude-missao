@@ -25,7 +25,8 @@ export const meta = {
 // args: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } (ou plano: { milestones })
 //       ou { spec } (texto ou caminho da SPEC: a missão confere a simplicidade e gera o plano), mais
 //       maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, maxRetentativasInfra?,
-//       maxRodadasCaca?, aceite?, retomar?, config?
+//       maxRodadasCaca?, aceite?, modo? ('enxugar': cortar código que já existe; também pelo marcador na SPEC), retomar?,
+//       config?
 // Etapas: [simplicidade e plano, só com spec] → pré-voo → contexto do plano → por milestone: prova de contrato,
 // features (implementa → revisão independente → commit atômico conferido), scrutiny ⇄ correções, caça bug ⇄ correções,
 // user testing ⇄ correções → caça final entre milestones → suíte completa ⇄ correções → aceite.
@@ -258,9 +259,20 @@ const PLANO = {
   required: ['milestones'],
 }
 
+// Medição do alvo no modo enxugar: no pré-voo (antes) e no aceite (depois).
+const MEDICAO = {
+  type: 'object',
+  properties: {
+    linhas: { type: 'integer' }, tabelas: { type: 'integer' }, filas: { type: 'integer' }, arquivos: { type: 'integer' },
+    testes: { type: 'integer' }, comandos: { type: 'string' },
+  },
+}
+
 const PRE_VOO = {
   type: 'object',
-  properties: { aprendizados: APRENDIZADOS, ok: { type: 'boolean' }, faltando: { type: 'array', items: { type: 'string' } } },
+  properties: {
+    aprendizados: APRENDIZADOS, ok: { type: 'boolean' }, faltando: { type: 'array', items: { type: 'string' } }, medicao: MEDICAO,
+  },
   required: ['ok', 'faltando'],
 }
 
@@ -270,11 +282,15 @@ const SPEC = typeof args?.spec === 'string' && args.spec.trim() ? args.spec.trim
 const planoDado = args?.milestones ?? args?.plano?.milestones ?? args?.retomar?.plano?.milestones ?? null
 const limitesOk = [MAX_RODADAS_CORRECAO, MAX_PROBLEMAS_POR_RODADA, MAX_RODADAS_REVISAO, MAX_FEATURES_POR_MILESTONE, MAX_RODADAS_CACA].every(n => Number.isInteger(n) && n >= 1) &&
   Number.isInteger(MAX_RETENTATIVAS_INFRA) && MAX_RETENTATIVAS_INFRA >= 0
+// Modo enxugar: cortar um código que já existe. Vem de args.modo, do retomar ou do marcador na SPEC em texto.
+const MARCA_ENXUGAR = '<!-- modo: enxugar -->'
+const modoOk = args?.modo === undefined || args.modo === 'enxugar'
+const MODO = args?.modo ?? args?.retomar?.modo ?? (SPEC?.includes(MARCA_ENXUGAR) ? 'enxugar' : null)
 const aceiteOk = args?.aceite === undefined || (Array.isArray(args.aceite) && args.aceite.every(x => typeof x === 'string'))
-if (!args || !limitesOk || !aceiteOk || (!planoDado && !SPEC)) {
+if (!args || !limitesOk || !aceiteOk || !modoOk || (!planoDado && !SPEC)) {
   throw new Error('args inválido: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } ou ' +
     '{ spec }, com maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, ' +
-    'maxRetentativasInfra?, maxRodadasCaca?, aceite?: [critérios], retomar?; limites inteiros ≥ 1 e retentativas ≥ 0')
+    'maxRetentativasInfra?, maxRodadasCaca?, aceite?: [critérios], modo?: "enxugar", retomar?; limites inteiros ≥ 1 e retentativas ≥ 0')
 }
 
 // A suíte completa roda uma vez ao fim, como uma etapa sem features: falha vira correção no mesmo loop.
@@ -363,6 +379,8 @@ const APRENDER = `Em aprendizados, devolva só técnica ou armadilha durável, q
 function montar(etapa, tarefa, areas = []) {
   const partes = []
   if (ETAPAS[etapa]) partes.push(`Técnica da etapa ${etapa} (orientação; regras do repo prevalecem):\n${ETAPAS[etapa]}`)
+  // No modo enxugar, o complemento etapas/<etapa>.enxugar.md ajusta a técnica para código que já existe.
+  if (MODO === 'enxugar' && ETAPAS[`${etapa}.enxugar`]) partes.push(`Modo enxugar (código existente):\n${ETAPAS[`${etapa}.enxugar`]}`)
   if (areas.length) partes.push('Contexto do plano (orientação; regras do repo prevalecem):\n' + areas.map(s => `### ${s.nome}\n${s.guia}`).join('\n\n'))
   if (APRENDIZADOS_PROJETO) partes.push(`Aprendizados do projeto:\n${APRENDIZADOS_PROJETO}`)
   if (contexto.aprendizados.length) partes.push(`Aprendizados desta missão:\n- ${contexto.aprendizados.join('\n- ')}`)
@@ -470,6 +488,11 @@ const relatorio = []
 const deForaAceitos = Array.isArray(args.retomar?.deFora) ? args.retomar.deFora.filter(s => typeof s === 'string') : []
 // Critérios de aceite com a evidência de cada um, preenchidos ao fim.
 let aceite = null
+// Modo enxugar: medição do alvo no início (pré-voo, preservada na retomada) e no fim (aceite).
+let medicaoAntes = retomar?.medicaoAntes ?? null
+let medicaoDepois = null
+const MEDIR = 'Meça também o alvo desta missão e devolva em medicao: linhas de código (sem testes), tabelas vivas, ' +
+  'filas/listeners, arquivos e testes, e em medicao.comandos os comandos que usou.'
 
 // Antes de qualquer commit: o ambiente roda o que a suíte e os testes vão precisar? Roda também na retomada.
 phase('Pré-voo')
@@ -478,7 +501,7 @@ const preVoo = await comRetentativa('pré-voo', () => trabalhar(montar('pre-voo'
   (CONFIG.preVoo ? `: ${CONFIG.preVoo}` : ': descubra pelo plano abaixo e pelo projeto os runners de teste, build e serviços de apoio') +
   `.\nNão altere código nem arquivos versionados. ${SAIDA_EM_ARQUIVO}\n` +
   'Devolva ok=true só se tudo o que a missão vai usar funciona; senão, em faltando, cada item que falta, com como ' +
-  `conferir e como resolver.\n${GIT_PROIBIDO}\n\n${planoTexto}`),
+  `conferir e como resolver.${MODO === 'enxugar' && !medicaoAntes ? `\n${MEDIR}` : ''}\n${GIT_PROIBIDO}\n\n${planoTexto}`),
   { label: 'pré-voo', phase: 'Pré-voo', schema: PRE_VOO },
 ))
 if (!preVoo || !preVoo.ok) {
@@ -489,6 +512,8 @@ if (!preVoo || !preVoo.ok) {
   const r = retomar ?? parar(pendentes[0], head, [], [], {}).retomar
   return { parouEm: 'pré-voo', motivo, faltando: preVoo?.faltando ?? [], plano: { milestones }, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), retomar: r }
 }
+
+if (MODO === 'enxugar' && !medicaoAntes) medicaoAntes = preVoo.medicao ?? null
 
 // Hidratação, como a Factory: o contexto do plano (guias por área, montados a partir do código atual) é gerado UMA vez
 // por missão e volta no `retomar`; a retomada o reaproveita, junto com os aprendizados, em vez de regenerá-lo.
@@ -1078,6 +1103,7 @@ const ACEITE = {
         required: ['criterio', 'atendido'],
       },
     },
+    medicao: MEDICAO,
   },
   required: ['criterios'],
 }
@@ -1092,12 +1118,14 @@ async function conferirAceite() {
   const r = await comRetentativa('aceite', () => trabalhar(montar('aceite',
     `${fonte}\n\nPara cada critério, aponte a evidência no HEAD atual: teste que passou (nome e comando) ou commit que ` +
     `o implementa (\`git log --oneline ${INICIO_MISSAO}..HEAD\`). atendido=true só com evidência concreta; sem ela, ` +
-    `atendido=false e, em evidencia, o que falta para provar. Não altere código. ${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`, contexto.areas),
+    `atendido=false e, em evidencia, o que falta para provar. Não altere código. ${SAIDA_EM_ARQUIVO}\n` +
+    (MODO === 'enxugar' ? `${MEDIR} Meça do mesmo jeito que no início: ${JSON.stringify(medicaoAntes ?? {})}.\n` : '') +
+    GIT_PROIBIDO, contexto.areas),
     { label: 'aceite', phase: 'Aceite', schema: ACEITE },
   ))
   if (!r) return { erro: 'o agente de aceite não respondeu' }
   if (!r.criterios.length) return { erro: 'o aceite não listou nenhum critério' }
-  return { criterios: r.criterios, faltou: r.criterios.filter(c => !c.atendido) }
+  return { criterios: r.criterios, faltou: r.criterios.filter(c => !c.atendido), medicao: r.medicao ?? null }
 }
 
 // Jornada do milestone como usuário, na stack local.
@@ -1136,7 +1164,7 @@ function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   return {
     parouEm: m.titulo, ...extra, plano: { milestones }, contexto, aprendizados: contexto.aprendizados,
     sugestaoAprendizados: sugestaoAprendizados(),
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1314,6 +1342,7 @@ for (const [i, m] of pendentes.entries()) {
       return pararAqui({ motivo: `critérios de aceite sem evidência mesmo depois de uma correção: ${a.faltou.map(c => c.criterio).join(' | ')}`, faltou: a.faltou, aceite: a.criterios })
     }
     aceite = a.criterios
+    medicaoDepois = a.medicao
   }
 
   // Os validadores rodam depois da última conferência: confirma que não sujaram a árvore nem commitaram.
@@ -1323,4 +1352,5 @@ for (const [i, m] of pendentes.entries()) {
   relatorio.push({ milestone: m.titulo, aprovado: true, rodadasCorrecao: rodada, commits: `${base}..${head}`, features: feitas })
 }
 
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
+const enxugar = MODO === 'enxugar' ? { modo: MODO, medicao: { antes: medicaoAntes, depois: medicaoDepois } } : {}
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, ...enxugar, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
