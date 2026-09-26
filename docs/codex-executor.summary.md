@@ -89,3 +89,11 @@ O CLI e as APIs recusam modelo ausente, vazio ou inválido antes de criar regist
 Os testes comprovam o bloqueio sem escolha e a presença das instruções de conversa, não uma interação humana real. Nenhum modelo real foi invocado nesta atualização. Os smokes da primeira entrega acima são anteriores a esta nova regra. Global, main e produto continuam sem alterações por esta adaptação; a validação da missão real continua pendente.
 
 Evidências: `%TEMP%/claude-missao-codex-modelo-red.log`, `claude-missao-codex-modelo-green.log`, `claude-missao-codex-modelo-full.log` e `claude-missao-codex-modelo-coverage.log` na mesma pasta.
+
+## Integração na main local (2026-09-26)
+
+A pedido do usuário, a adaptação foi integrada na main local pelo commit `383ba7d`. A main havia avançado até `1bb6e66`; seus 16 commits adicionais foram preservados, sem conflitos, e testados junto com a adaptação antes de avançar o checkout principal.
+
+Validação do conjunto: `node --test teste/*.test.mjs`, **239/239 testes passaram**, sem falhas/skips. Revisão independente de compatibilidade: nenhum bloqueante confirmado. Também foram conferidos os arquivos preservados de cada lado e `git diff --cached --check`. Evidência: `%TEMP%/claude-missao-merge-main-tests.log`.
+
+A main local agora contém o executor e a escolha obrigatória de modelo. Não houve push nem reinstalação global. A missão com modelo real continua pendente de validação; este merge não altera esse limite.
