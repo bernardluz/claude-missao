@@ -569,6 +569,10 @@ function resumoDe(c) {
   if ('confirmado' in r) return r.confirmado ? 'bug confirmado' : 'refutado'
   if (Array.isArray(r.faltando)) return r.ok ? 'ambiente pronto' : `falta: ${r.faltando.join(' | ')}`
   if (Array.isArray(r.perguntas)) return r.ok && !r.perguntas.length && !r.cortes?.length ? 'SPEC simples' : `${r.perguntas.length} pergunta(s), ${r.cortes?.length ?? 0} corte(s)`
+  if (Array.isArray(r.itens)) {
+    const bloq = r.itens.filter(i => i.classe !== 'decidido' || !String(i.sugestao ?? '').trim()).length
+    return r.itens.length ? `${r.itens.length - bloq} decidido(s), ${bloq} bloqueante(s)` : 'SPEC simples'
+  }
   if (Array.isArray(r.milestones)) return `${r.milestones.length} milestones`
   if (Array.isArray(r.criterios)) return `${r.criterios.filter(x => x.atendido).length} de ${r.criterios.length} critérios com evidência`
   if ('impacta' in r) return r.impacta ? `impacta: ${r.motivo ?? ''}` : 'não impacta'

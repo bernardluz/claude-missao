@@ -38,7 +38,7 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   arquivosDeFora     arquivos dos commits que não são da missão (padrão ['z/fora.js'])
 //   areas              áreas que o agente do contexto do plano devolve
 //   aprendizados       { [label]: [textos] } aprendizados que esse agente devolve
-//   perguntas, cortes  o que a verificação de simplicidade devolve (qualquer um deles faz a missão parar)
+//   simplicidade       [itens { tipo, texto, sugestao, classe }] que a verificação de simplicidade devolve
 //   planoGerado        milestones que o agente de planejamento devolve (padrão: os de plano())
 //   preVooFalta        [itens] o pré-voo acusa o que falta no ambiente
 //   contratoFalso      { [milestone]: [premissas] } premissas que a prova de contrato devolve (use confere: false)
@@ -107,7 +107,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       return null
     }
     if (l === 'contexto do plano') return { areas: o.areas ?? [] }
-    if (l === 'simplicidade') return { ok: !o.perguntas && !o.cortes, perguntas: o.perguntas ?? [], cortes: o.cortes ?? [] }
+    if (l === 'simplicidade') return { itens: o.simplicidade ?? [] }
     if (l === 'planejar') return { milestones: o.planoGerado ?? plano().milestones }
     // Quando o prompt pede a medição (modo enxugar), o pré-voo mede o antes e o aceite, o depois.
     const pedeMedicao = /devolva em medicao/.test(prompt)

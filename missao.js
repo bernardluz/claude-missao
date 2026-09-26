@@ -214,15 +214,28 @@ const VALIDACAO = {
   required: ['aprovado', 'problemas'],
 }
 
+// Cada pergunta ou corte vem classificado: decidido (tem sugestão e é técnico ou de desenho interno; a missão segue com
+// ela) ou bloqueante (produto ou risco sem resposta na SPEC nem no código; só esse para a missão).
 const SIMPLICIDADE = {
   type: 'object',
   properties: {
     aprendizados: APRENDIZADOS,
-    ok: { type: 'boolean' },
-    perguntas: { type: 'array', items: { type: 'string' } },
-    cortes: { type: 'array', items: { type: 'string' } },
+    itens: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          tipo: { type: 'string', enum: ['pergunta', 'corte'] },
+          texto: { type: 'string' },
+          sugestao: { type: 'string' },
+          classe: { type: 'string', enum: ['decidido', 'bloqueante'] },
+          motivo: { type: 'string' },
+        },
+        required: ['tipo', 'texto', 'classe'],
+      },
+    },
   },
-  required: ['ok', 'perguntas', 'cortes'],
+  required: ['itens'],
 }
 
 const PLANO = {
@@ -279,7 +292,9 @@ const MARCA_ENXUGAR = '<!-- modo: enxugar -->'
 const modoValido = v => v === undefined || v === null || v === 'enxugar'
 const modoOk = args?.modo !== null && modoValido(args?.modo) && modoValido(args?.retomar?.modo)
 const MODO = args?.modo ?? args?.retomar?.modo ?? (SPEC?.includes(MARCA_ENXUGAR) ? 'enxugar' : null)
-const aceiteOk = args?.aceite === undefined || (Array.isArray(args.aceite) && args.aceite.every(x => typeof x === 'string'))
+// Critério de aceite passado como texto vira lista de um item.
+const CRITERIOS_ACEITE = typeof args?.aceite === 'string' ? [args.aceite] : args?.aceite
+const aceiteOk = CRITERIOS_ACEITE === undefined || (Array.isArray(CRITERIOS_ACEITE) && CRITERIOS_ACEITE.every(x => typeof x === 'string'))
 if (!args || !limitesOk || !aceiteOk || !modoOk || (!planoDado && !SPEC)) {
   throw new Error('args inválido: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } ou ' +
     '{ spec }, com maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, ' +
@@ -323,6 +338,9 @@ if (retomar && (!planoDado || ![...planoDado, SUITE].some(m => m.titulo === reto
   (retomar.inicioMissao !== undefined && (typeof retomar.inicioMissao !== 'string' || retomar.inicioMissao.length < 7)))) {
   throw new Error('args.retomar inválido: use o objeto `retomar` devolvido pela execução que parou ({ aPartirDe, inicioMissao, base, head, commits, concluidas, plano, contexto })')
 }
+
+// Decisões que a missão assumiu pela sugestão da verificação de simplicidade, para o usuário revisar no fim.
+const decisoesAssumidas = Array.isArray(args?.retomar?.decisoesAssumidas) ? args.retomar.decisoesAssumidas.filter(d => typeof d === 'string') : []
 
 // Contexto da missão: áreas do plano (hidratação, gerada uma vez) e aprendizados dos workers. Volta no retomar.
 const contexto = { areas: [], aprendizados: [] }
@@ -437,18 +455,28 @@ let milestones = planoDado
 if (!milestones) {
   phase('Simplicidade')
   const s = await comRetentativa('simplicidade', () => trabalhar(montar('verificar-simplicidade',
-    `${SPEC_NO_PROMPT()}\n\nLeia a SPEC e o código que ela toca e confira a simplicidade dela. Devolva em perguntas o ` +
-    'que precisa de decisão do usuário e em cortes o que sugere tirar ou trocar por algo mais simples, cada item com ' +
-    'o motivo e a evidência no código. Sem perguntas nem cortes, ok=true. Não escreva arquivos nem rode build: só ' +
-    'leitura.\n' + GIT_PROIBIDO),
+    `${SPEC_NO_PROMPT()}\n\nLeia a SPEC e o código que ela toca e confira a simplicidade dela. Devolva em itens cada ` +
+    'pergunta (decisão em aberto) e cada corte (o que tirar ou trocar por algo mais simples), com o motivo e a ' +
+    'evidência no código, a sugestão e a classe:\n' +
+    '- decidido: tem sugestão e é técnico ou de desenho interno; a missão segue com a sugestão, sem perguntar;\n' +
+    '- bloqueante: decisão de produto ou de risco (dinheiro, acesso, dado sensível) que nem a SPEC nem o código ' +
+    'respondem, ou corte que remove algo que a SPEC pede explicitamente.\n' +
+    'Na dúvida entre as duas, e com sugestão segura, decidido. Sem nada, itens vazio. Não escreva arquivos nem rode ' +
+    'build: só leitura.\n' + GIT_PROIBIDO),
     { label: 'simplicidade', phase: 'Simplicidade', agentType: comoAgente(CONFIG.leitor), schema: SIMPLICIDADE },
   ))
   if (!s) return { parouEm: 'simplicidade', motivo: 'o agente que verifica a simplicidade não respondeu', aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
-  if (!s.ok || s.perguntas.length || s.cortes.length) {
+  // Item sem sugestão não tem como ser decidido pela missão: conta como bloqueante.
+  const bloqueia = i => i.classe !== 'decidido' || !String(i.sugestao ?? '').trim()
+  const bloqueantes = s.itens.filter(bloqueia).map(i => ({ tipo: i.tipo, texto: i.texto, sugestao: i.sugestao ?? null, motivo: i.motivo ?? null }))
+  decisoesAssumidas.push(...s.itens.filter(i => !bloqueia(i)).map(i => `${i.tipo}: ${i.texto} → ${i.sugestao.trim()}`))
+  if (decisoesAssumidas.length) log(`simplicidade: ${decisoesAssumidas.length} decisão(ões) assumida(s) pela sugestão, para revisar no fim`)
+  if (bloqueantes.length) {
     return {
       parouEm: 'simplicidade',
-      motivo: 'a verificação de simplicidade trouxe perguntas ou cortes: decida, ajuste a SPEC e rode de novo (nenhum código foi escrito)',
-      perguntas: s.perguntas, cortes: s.cortes, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(),
+      motivo: `a verificação de simplicidade trouxe ${bloqueantes.length} decisão(ões) de produto ou de risco que a SPEC ` +
+        'não responde: decida, ajuste a SPEC e rode de novo (nenhum código foi escrito)',
+      bloqueantes, decisoesAssumidas, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(),
     }
   }
   phase('Planejar')
@@ -456,14 +484,25 @@ if (!milestones) {
     `${SPEC_NO_PROMPT()}\n\nA SPEC foi aprovada. Leia-a e o código que ela toca e gere o plano: milestones com titulo, ` +
     `criterio verificável, caca (áreas de caça-bug do milestone), userTesting (a jornada, só se houver uma que um ` +
     `usuário percorre; senão omita), ui (as telas e fluxos de usuário do milestone, só se houver; senão omita) e features com titulo único e spec. No máximo ${MAX_FEATURES_POR_MILESTONE} ` +
-    `features por milestone; o título "${SUITE.titulo}" é reservado. Não escreva arquivos nem rode build: só leitura.\n` +
-    GIT_PROIBIDO),
+    `features por milestone. Nunca use "${SUITE.titulo}" como título de milestone: ele é reservado. Não escreva ` +
+    'arquivos nem rode build: só leitura.' +
+    (decisoesAssumidas.length
+      ? `\nDecisões assumidas na verificação de simplicidade (aplique no plano; corte sai do plano):\n- ${decisoesAssumidas.join('\n- ')}`
+      : '') + '\n' + GIT_PROIBIDO),
     { label: 'planejar', phase: 'Planejar', agentType: comoAgente(CONFIG.leitor), schema: PLANO },
   ))
   // Campo opcional vazio conta como ausente.
   const gerado = p?.milestones?.map(m => ({ ...m, caca: m.caca?.length ? m.caca : undefined, userTesting: m.userTesting?.trim() || undefined, ui: m.ui?.trim() || undefined }))
+  // Título reservado no plano gerado é renomeado, sem parar a missão.
+  for (const m of gerado ?? []) {
+    if (m.titulo !== SUITE.titulo) continue
+    let n = 1
+    while (gerado.some(x => x.titulo === `Milestone final ${n > 1 ? n : ''}`.trim())) n++
+    m.titulo = `Milestone final ${n > 1 ? n : ''}`.trim()
+    log(`plano gerado usou o título reservado "${SUITE.titulo}": renomeado para "${m.titulo}"`)
+  }
   const erro = gerado ? erroDoPlano(gerado) : 'o agente de planejamento não respondeu'
-  if (erro) return { parouEm: 'planejar', motivo: `plano gerado não serve: ${erro}`, plano: p ?? null, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
+  if (erro) return { parouEm: 'planejar', motivo: `plano gerado não serve: ${erro}`, plano: p ?? null, decisoesAssumidas, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
   milestones = JSON.parse(JSON.stringify(gerado))
   log(`Plano gerado: ${milestones.length} milestones, ${milestones.reduce((n, m) => n + m.features.length, 0)} features`)
 }
@@ -535,7 +574,7 @@ if (!preVoo || !preVoo.ok) {
     : 'o agente de pré-voo não respondeu'
   // Parada antes de qualquer commit: devolve o retomar recebido ou um que recomeça no primeiro milestone.
   const r = retomar ?? parar(pendentes[0], head, [], [], {}).retomar
-  return { parouEm: 'pré-voo', motivo, faltando: preVoo?.faltando ?? [], plano: { milestones }, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), retomar: r }
+  return { parouEm: 'pré-voo', motivo, faltando: preVoo?.faltando ?? [], plano: { milestones }, decisoesAssumidas, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), retomar: r }
 }
 
 if (MODO === 'enxugar' && !medicaoAntes) {
@@ -1203,8 +1242,8 @@ const ACEITE = {
 }
 // Liga cada critério de aceite (args.aceite, a seção de aceite da SPEC ou os critérios dos milestones) a uma evidência.
 async function conferirAceite() {
-  const fonte = Array.isArray(args.aceite) && args.aceite.length
-    ? `Critérios de aceite:\n- ${args.aceite.join('\n- ')}`
+  const fonte = Array.isArray(CRITERIOS_ACEITE) && CRITERIOS_ACEITE.length
+    ? `Critérios de aceite:\n- ${CRITERIOS_ACEITE.join('\n- ')}`
     : SPEC
       ? `${SPEC_NO_PROMPT()}\n\nUse os critérios de aceite da SPEC (a seção de aceite; se ela não tiver, os critérios dos milestones abaixo).\n` +
         milestones.map(m => `- ${m.titulo}: ${m.criterio}`).join('\n')
@@ -1261,9 +1300,9 @@ function guiasDe(m) {
 function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
-    parouEm: m.titulo, ...extra, deForaTocando: [...deForaTocando], sujeiraCommitada: [...sujeiraCommitada], plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
+    parouEm: m.titulo, ...extra, decisoesAssumidas: [...decisoesAssumidas], deForaTocando: [...deForaTocando], sujeiraCommitada: [...sujeiraCommitada], plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
     sugestaoAprendizados: sugestaoAprendizados(),
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs }, sujeiraInicial: [...sujeiraInicial], sujeiraCommitada: [...sujeiraCommitada], arquivosPendentes: extra.arquivosPendentes ?? [] },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs }, decisoesAssumidas: [...decisoesAssumidas], sujeiraInicial: [...sujeiraInicial], sujeiraCommitada: [...sujeiraCommitada], arquivosPendentes: extra.arquivosPendentes ?? [] },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1473,4 +1512,4 @@ for (const [i, m] of pendentes.entries()) {
 }
 
 const enxugar = MODO === 'enxugar' ? { modo: MODO, medicao: { antes: medicaoAntes, depois: medicaoDepois, ...(antesParcial ? { antesParcial: true } : {}) } } : {}
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, deForaTocando, sujeiraCommitada, ...enxugar, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, decisoesAssumidas, deForaTocando, sujeiraCommitada, ...enxugar, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
