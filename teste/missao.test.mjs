@@ -1360,3 +1360,17 @@ describe('pasta nova e retomada', () => {
     assert.match(p2.prompt('commit: F1'), /git add -- 'pkg\/novo\/A\.kt'/)
   })
 })
+
+describe('retomada com commit de fora em arquivo da missão', () => {
+  test('commit alheio entre a parada e a retomada que toca arquivo da missão fica marcado', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { validacao: [2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'M1')
+    estado.git.push('alheio00')
+    estado.porSha.alheio00 = ['x/a.js']
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.deepEqual(p2.resultado.deForaTocando, [{ milestone: 'M1', commits: ['alheio00'], arquivos: ['x/a.js'] }])
+    assert.match(p2.prompt('revisão: M1'), /Arquivos da missão tocados por commit de fora: x\/a\.js \(alheio00\)/)
+  })
+})

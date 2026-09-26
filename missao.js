@@ -1302,15 +1302,19 @@ for (const [i, m] of pendentes.entries()) {
     let cm = c
     if (extras.length) {
       // Os arquivos da missão saem de uma nova leitura, já sem os extras; eles entram como de fora e nos esperados.
-      const cx = await lerGit(retomar.head, 'Preparar')
       cm = await lerGit(INICIO_MISSAO, 'Preparar', 'conferência', [' --resumo', base, ...deForaAceitos, ...extras].join(' '))
-      if (!cx || !cm) return { ...parar(m, base, feitas, [], { motivo: `não foi possível ler o repositório para retomar${causaGit()}` }, jaConcluidas), retomar }
-      aceitarCommitsDeFora(cx, extras, m.titulo)
-      commits.push(...extras)
+      if (!cm) return { ...parar(m, base, feitas, [], { motivo: `não foi possível ler o repositório para retomar${causaGit()}` }, jaConcluidas), retomar }
     }
     // Arquivos que a missão já commitou, sem os dos commits de fora aceitos: base para marcar commit de fora que os toca.
     for (const a of cm.arquivos.map(normalizar)) arquivosDaMissao.add(a)
     for (const a of cm.arquivosDoMilestone.map(normalizar)) arquivosDoMilestone.add(a)
+    // Só depois de conhecer os arquivos da missão os extras são aceitos, para marcar os que tocam neles.
+    if (extras.length) {
+      const cx = await lerGit(retomar.head, 'Preparar')
+      if (!cx) return { ...parar(m, base, feitas, [], { motivo: `não foi possível ler o repositório para retomar${causaGit()}` }, jaConcluidas), retomar }
+      aceitarCommitsDeFora(cx, extras, m.titulo)
+      commits.push(...extras)
+    }
     log(`Retomando "${m.titulo}" sobre ${base}: ${esperado.length} commits anteriores, ${jaConcluidas.length} itens ` +
       `concluídos, ${arquivosDaMissao.size} arquivos já tocados pela missão; orçamento de correções recomeça em ${MAX_RODADAS_CORRECAO} rodadas`)
   }
