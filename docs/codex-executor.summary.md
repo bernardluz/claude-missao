@@ -24,7 +24,7 @@ Não foi criada skill de missão. `missao.js`, `instalar.mjs` e `git-estado.mjs`
 - Casos adicionais: fila após falha, schema, retomada inválida, CLI, papéis e fluxo completo com commit em Git temporário.
 - Review independente final de módulos/testes/integração: nenhum bloqueante novo confirmado. O revisor não concluiu a suíte própria; os resultados completos abaixo foram obtidos pelo coordenador.
 
-## Validação final
+## Validação da primeira entrega
 
 - `node --test teste/*.test.mjs`: **221/221 passaram**, sem skip/cancelamento.
 - `node --experimental-test-coverage --test-coverage-include="codex/*.mjs" --test teste/codex.test.mjs`: **23/23 passaram**.
@@ -71,3 +71,21 @@ Não se mudou modelo/provedor para esconder o problema. Não foi executada nem v
 - Logs podem conter contexto privado; não publicar registros brutos.
 
 Subagentes: guia TDD e revisor independente, autorizados pelo usuário. GitNexus/Cortex não usados. IntelliJ/Dart não se aplicam: alteração somente Node/Markdown, sem Java, Kotlin, Dart ou Flutter.
+
+## Atualização — escolha obrigatória do modelo (2026-09-26)
+
+Pedido do usuário: sempre perguntar qual modelo usar. Antes de iniciar ou retomar no Codex, as duas skills perguntam "Qual modelo você quer usar nesta missão?" e aguardam a resposta. Uma escolha vale para todos os agentes daquela execução. A próxima retomada exige nova escolha, sem herdar modelo do CLI, da conversa ou da execução anterior.
+
+O CLI e as APIs recusam modelo ausente, vazio ou inválido antes de criar registros/lock ou subprocessos; o CLI faz isso antes de ler arquivos de entrada. O modelo escolhido é enviado explicitamente em cada chamada. Falha não autoriza substituição automática.
+
+- Checkpoint RED `284f0c0`: os 5 casos novos falharam pelo motivo esperado, antes da mudança de código.
+- Contrato atualizado em `56a44bb`; GREEN/implementação em `5b93efe`.
+- Mesmo alvo `node --test --test-name-pattern="modelo escolhido:" teste/codex.test.mjs`: 5/5 GREEN.
+- Suíte completa `node --test teste/*.test.mjs`: **226/226 passaram**.
+- Cobertura com o comando anterior: **28/28 testes**, **95,78% linhas, 86,19% branches e 84,13% funções** no conjunto do adaptador.
+- Revisão independente do delta: sem bloqueantes confirmados; somente leitura estática pelo revisor. Suíte/cobertura executadas pelo coordenador.
+- As skills foram instaladas apenas em home temporário de teste; a pergunta, espera pela resposta e comandos com modelo explícito foram conferidos nas duas cópias Codex.
+
+Os testes comprovam o bloqueio sem escolha e a presença das instruções de conversa, não uma interação humana real. Nenhum modelo real foi invocado nesta atualização. Os smokes da primeira entrega acima são anteriores a esta nova regra. Global, main e produto continuam sem alterações por esta adaptação; a validação da missão real continua pendente.
+
+Evidências: `%TEMP%/claude-missao-codex-modelo-red.log`, `claude-missao-codex-modelo-green.log`, `claude-missao-codex-modelo-full.log` e `claude-missao-codex-modelo-coverage.log` na mesma pasta.
