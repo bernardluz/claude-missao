@@ -152,11 +152,10 @@ Uma feature por vez. Ticket em status 1.
    com as linhas de atribuição da sessão. Gate do commit falhou: nada entrou, a saída vira apontamento para o
    implementador e a feature volta ao passo 4 (nova revisão). O stage fica com a versão antiga. Por isso o
    `git add` e a conferência de `git diff` vazio valem em toda tentativa, e não só na primeira.
-6. **Conferir o commit.** `git rev-list <HEAD esperado>..HEAD` tem de ser só o SHA do seu commit, e
-   `git show --name-only --format='%H %P' HEAD` mostra o pai igual ao HEAD esperado e exatamente os arquivos revisados.
-   Sujeira restante na árvore (linha de base ou outras sessões) não conta. Outro SHA no intervalo: grave o seu commit no estado, se ele tem
-   só arquivos revisados, e pare, como em [Commit de fora](#commit-de-fora). Arquivo não revisado no seu commit: pare
-   sem gravá-lo. Tudo certo: grave no estado e no ticket. Ticket em status 2. Arquive os dois filhos
+6. **Conferir o commit.** `git rev-list --reverse <HEAD esperado>..HEAD` tem de conter o SHA do seu commit, e
+   `git show --name-only <seu SHA>` mostra exatamente os arquivos revisados. Sujeira restante na árvore (linha de base
+   ou outras sessões) não conta. Outro SHA no intervalo é commit de fora: aceite-o como em
+   [Commit de fora](#commit-de-fora), sem parar. Arquivo não revisado no seu commit: pare sem gravá-lo. Tudo certo: grave no estado e no ticket. Ticket em status 2. Arquive os dois filhos
    (`traycer_archive_agent`).
 
 ### 4. Scrutiny do milestone
@@ -215,7 +214,6 @@ Cada queda conta em `maxRetentativasInfra`. Esgotou: pare.
 
 Pare, sem commitar nada pendente, quando:
 - um limite estourar;
-- aparecer commit que não é seu e que impacta a missão ([Commit de fora](#commit-de-fora));
 - o harness recusar um comando seu ou de um filho;
 - o git não bater com o estado;
 - surgir desalinhamento de produto.
@@ -232,19 +230,16 @@ mostre a diferença ao usuário.
 
 ### Commit de fora
 
-Commit de outra sessão ou automação no meio da missão: se ele toca arquivo da missão, pare na hora. Senão, um filho
-só-leitura olha a mensagem, os arquivos e o diffstat e diz se ele afeta algo de que a missão depende (build,
-dependências, migrations do mesmo módulo, contrato usado). Não afeta: grave-o no estado como de fora, na ordem do
-`--reverse`, atualize o HEAD esperado e siga. Afeta: pare sem adotá-lo. Diga ao usuário o SHA
-(`git rev-list --reverse <HEAD esperado>..HEAD`) e as duas saídas:
+Commit de outra sessão ou automação no meio da missão **nunca para a missão**. Aceite-o sempre:
+- grave no estado todos os SHAs do intervalo, na ordem do `--reverse`: os de fora marcados como de fora (com a
+  mensagem) e o seu, se já conferido, como commit da feature; grave o HEAD real como HEAD esperado;
+- commit de fora não é trabalho da missão: fica fora do escopo de revisão, scrutiny, caça e correção;
+- se ele toca arquivo da missão, registre os arquivos como aviso no estado e no resumo final, e peça ao scrutiny e à
+  caça para revisarem esses arquivos;
+- se o diff da feature em curso foi junto num commit de fora, marque a feature como concluída, com aviso.
 
-- **Aceitar:** grave na lista de commits do estado todos os SHAs do intervalo, na ordem do `--reverse`: os de fora
-  marcados como de fora e o seu, se já conferido, como commit da feature. Grave o HEAD real como HEAD esperado. Se o
-  diff da feature em curso foi junto num commit de fora, marque a feature como concluída.
-- **Recusar:** o usuário tira o commit do histórico e você ajusta o estado ao git resultante.
-
-Sem um dos dois ajustes, a retomada recusa. Seu commit com arquivo que a revisão não viu segue a mesma regra: fica
-fora da lista do estado até o usuário decidir; recusado, a feature se repete.
+Seu commit com arquivo que a revisão não viu é outra coisa: fica fora da lista do estado até o usuário decidir;
+recusado, a feature se repete.
 
 ## Filhos
 
