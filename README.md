@@ -85,15 +85,17 @@ cortes explícitos e critérios de aceite verificáveis.
   O workflow interpreta o JSON: branch, árvore limpa, a lista exata de commits em ordem e os arquivos.
   Saída inválida repete a leitura, nunca vira apontamento. A conferência roda logo depois de cada
   commit, quando `<HEAD anterior>..HEAD` precisa ter só o commit da feature, e de novo a cada milestone.
-- **Commit de fora.** Commit de outra sessão ou automação que toca arquivo da missão para a missão
-  na hora. Os demais vão para um agente (`modeloCommitDeFora`, sonnet com effort low), que decide se
-  eles afetam algo de que a missão depende (build, dependências, migrations do mesmo módulo,
-  contrato usado). Se não afetam, entram nos commits esperados e a missão segue, com registro no log.
-  Se afetam, a missão para com o SHA no motivo. O commit da feature já entra no `retomar`. Para aceitar
-  o commit de fora, ponha seus SHAs em `retomar.deFora` e em `retomar.commits` a saída de
-  `git rev-list --reverse <retomar.base>..HEAD` e em `retomar.head` o HEAD real. Para recusá-lo, tire-o do
-  histórico e ajuste o `retomar`. Sem ajuste, a retomada recusa. O mesmo vale para um commit da feature com
-  arquivo que a revisão não viu, sem o `deFora`, porque ele é da missão: fica fora do `retomar` até você decidir.
+- **Commit de fora nunca para a missão.** Commit de outra sessão ou automação é sempre aceito: entra nos
+  commits esperados e em `retomar.deFora`, não conta como da missão, e a missão segue com registro no log. Os
+  workers continuam commitando só os próprios caminhos (`git add -- <paths>`).
+  - Se ele toca arquivo da missão, o log diz `commit de fora aceito, toca a missão: <shas>`, e os arquivos vão em
+    `deForaTocando` (no `retomar` e no resultado final). O scrutiny e a caça do milestone, a caça final e a suíte
+    recebem "arquivos da missão tocados por commit de fora: revise-os".
+  - Se ele levou o diff da feature (ex.: `git commit -a` de outra sessão) e nenhum arquivo dela ficou pendente na
+    árvore, a feature conta como concluída. Se o diff ainda está na árvore (ex.: `index.lock`), a missão para como
+    antes: é problema de lock, não de commit de fora.
+  - Commit da própria feature com arquivo que a revisão não viu não é de fora: fica fora do `retomar` até você
+    decidir, como antes.
 - **Saída em arquivo, nunca em pipe.** Os agentes mandam a saída de build, testes, gates e
   `git commit` para arquivo temporário e leem o arquivo depois. Um daemon deixado vivo pelo gate, como o
   do compilador Kotlin, herda o pipe e trava o comando.
@@ -109,7 +111,7 @@ cortes explícitos e critérios de aceite verificáveis.
   execução, a missão continua do milestone interrompido, desde que o repositório esteja exatamente
   como ficou. O `retomar` traz o plano (`retomar.plano`) e o contexto do plano com os aprendizados
   (`retomar.contexto`): a retomada não replaneja e só regenera o contexto se ele ficou sem áreas. Leva também os
-  commits de fora aceitos (`deFora`), os bugs corrigidos pela caça (`bugsCorrigidos`) e se a caça final já rodou
+  commits de fora aceitos (`deFora`) e os que tocam a missão (`deForaTocando`), os bugs corrigidos pela caça (`bugsCorrigidos`) e se a caça final já rodou
   (`cacaFinalFeita`). Na retomada, os arquivos que a missão já tocou vêm do git.
 
 ## Modo enxugar
@@ -174,7 +176,6 @@ Todas as chaves são opcionais. Sem configuração, o workflow usa o agente padr
 | `suiteCompleta` | Como rodar, ao fim, a suíte completa do que a missão tocou e de quem depende disso. `{inicio}` vira o commit onde a missão começou | o agente acha módulos tocados e dependentes pelo `git diff` |
 | `preVoo` | O que o pré-voo confere: comandos e requisitos da suíte e dos testes (ex.: Docker vivo, WSL com pwsh) | o agente descobre pelo plano |
 | `modeloConferencia` | Modelo do agente que só roda o `git-estado.mjs` (e do que deriva as áreas de caça) | `haiku` |
-| `modeloCommitDeFora` | Modelo do agente que decide se um commit de fora impacta a missão | `sonnet` |
 
 Os `agentType` precisam existir no projeto, em `.claude/agents/`. Prefira um `revisor` e um `leitor` que
 tenham só ferramentas de leitura. O agente padrão pode escrever e só obedece à instrução do prompt.
@@ -316,9 +317,9 @@ O servidor só escuta em 127.0.0.1 e recusa requisições cujo Host não seja `1
 - **Técnica das etapas só na cópia instalada.** O script do Workflow não lê arquivos: a técnica de
   cada etapa entra na instalação. O núcleo rodado direto funciona, mas sem ela. Mudou `etapas/` ou o
   complemento do projeto, reinstale.
-- **Commit de fora julgado só na conferência.** O agente que julga impacto roda nas conferências
-  depois do commit e do milestone. Commit de fora percebido quando um worker cai, ou que leva o diff
-  da feature, ainda para a missão como antes.
+- **Commit de fora percebido quando um worker cai.** Se o worker cai e o histórico mudou, a missão não sabe
+  se o commit é dele ou de outra sessão, e para como antes. Commit de fora percebido depois do último
+  scrutiny do milestone só é revisado na caça final e na suíte.
 - **Bug repetido.** Quem diz que um achado repete um bug já corrigido é o caçador, a partir da lista
   de corrigidos que recebe; não há comparação textual.
 

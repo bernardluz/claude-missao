@@ -64,7 +64,7 @@ Leia `.claude/missao.config.json` se existir. As chaves são as mesmas do workfl
 - `revisor`, `revisoresPorPasta`, `leitor`: nomes em `.claude/agents/`. O filho Traycer recebe a instrução de ler
   `.claude/agents/<nome>.md` e seguir aquele papel, só com leitura.
 - `proibicoesExtras`, `formatoCommit`, `idioma`, `exemplosSkills`, `suiteCompleta`, `preVoo`: veja o README do
-  claude-missao. `modeloConferencia` e `modeloCommitDeFora` valem só para o workflow.
+  claude-missao. `modeloConferencia` vale só para o workflow.
 
 O revisor vem **sempre** da configuração. Nem o plano nem o usuário no meio da execução o desligam.
 
