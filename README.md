@@ -15,7 +15,8 @@ Pré-voo       → o ambiente roda testes e suíte? Falha para antes de qualquer
 Contexto      → contexto do plano por área, gerado UMA vez e reaproveitado na retomada
 
 Para cada milestone:
-  Prova de contrato → premissas sobre outros serviços conferidas no código do dono; falsa PARA
+  Prova de contrato → premissas sobre outros serviços conferidas no código do dono; trivial é corrigida
+                      pelo valor real, só divergência de comportamento, contrato ou risco PARA
   UI/UX             → só com tela: desenha telas e fluxos com checklist de UX, sem esperar aprovação
   Para cada feature, em série:
     implementa (worker nunca commita) → revisão independente → ajustes até aprovar → leitura do git →
@@ -69,6 +70,11 @@ descartados. Os demais vão para os próximos prompts, para `retomar.contexto` e
 etapa como "Aprendizados do projeto"; mudou, reinstale (`--verificar` acusa).
 Como vai em todo prompt, o arquivo precisa de curadoria: junte repetidos, corte o que envelheceu e mantenha só
 técnica e armadilha durável. O instalador avisa, sem falhar, quando ele passa de 60 linhas.
+
+**Prova de contrato.** Premissa que não confere e tem correção óbvia no código (contagem, número, nome,
+caminho, próxima versão de migration) é decidida: a spec da feature recebe o valor real e a correção entra em
+`decisoesAssumidas`, para você revisar no fim. Só para a missão a divergência que muda comportamento ou
+contrato, ou que envolve dinheiro, acesso ou dado sensível sem resposta no código.
 
 **SPEC simples.** A skill `criar-spec-simples`, instalada no global, orienta o agente principal a
 escrever a SPEC na conversa, antes da missão: quem usa, fluxo em cliques, cada peça com uso real,

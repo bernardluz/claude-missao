@@ -117,7 +117,9 @@ para levar ao `AGENTS.md` da área.
 
 Antes das features de cada milestone, a **prova de contrato**: um filho só-leitura lista as premissas das features
 sobre outros serviços ou módulos (rotas, campos, ids, comportamento) e confere cada uma no código do dono. Premissa
-que não confere: pare com todas as perguntas juntas, antes de implementar.
+que não confere com correção óbvia (contagem, número, nome, caminho, próxima migration livre): corrija a feature com o
+valor real, grave como decisão assumida em `estado/` e siga. Divergência que muda comportamento ou contrato, ou que
+envolve dinheiro, acesso ou dado sensível sem resposta: pare com todas as perguntas juntas, antes de implementar.
 
 Depois, em milestone com tela (`ui` no plano, ou tela que você identifica nas features), a **UI/UX**: um filho desenha
 as telas e fluxos com a técnica e o checklist de `ui-ux` (use `/design`, `impeccable` ou o Artifact de design se houver;
