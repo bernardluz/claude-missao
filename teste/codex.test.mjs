@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -263,4 +263,40 @@ test('configuração inválida e falha de spawn não ganham fallback permissivo'
   const agent = criarAgenteCodex({ ...base, comando: [join(registros, 'nao-existe.exe')] })
   await assert.rejects(agent('teste', { label: 'F1', phase: 'Implementar', schema }), /Codex não iniciou/)
   assert.equal((await agent.encerrar()).intervencaoManual, false)
+})
+
+test('workflow instalado revisa e commita em Git temporário pelo CLI falso', async () => {
+  const { rodarMissao } = await import('../codex/rodar.mjs')
+  const { raiz, git } = projeto(), estado = temp(), caso = join(estado, 'cenario.json')
+  escrever(caso, { missaoSemMudancas: true })
+  const r = await rodarMissao({ projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] })
+  assert.equal(r.resultado.concluido, true, JSON.stringify(r.resultado))
+  assert.equal(ler(r.arquivoResultado).resultado.concluido, true)
+  assert.equal(git('rev-list', '--count', 'HEAD'), '2')
+  assert.equal(git('show', '--format=', '--name-only', 'HEAD'), 'saida.txt')
+  assert.equal(ler(join(r.pasta, 'estado.json')).status, 'concluida')
+  assert.ok(!existsSync(join(git('rev-parse', '--absolute-git-dir'), 'missao-codex.lock')))
+  assert.equal(git('status', '--porcelain'), '')
+})
+
+test('falha rejeita agentes na fila e drena o processo irmão já iniciado', async () => {
+  const { agent, registros } = await agenteFalso({ porLabel: {
+    A: { codigo: 9 }, B: { demoraMs: 300, resultado: { ok: true } }, C: { resultado: { ok: true } },
+  } }, { concorrencia: 2 })
+  const r = await Promise.allSettled(['A', 'B', 'C'].map(label => agent('teste', { label, phase: 'Implementar', schema })))
+  assert.equal(r[0].status, 'rejected'); assert.equal(r[1].status, 'fulfilled'); assert.equal(r[2].status, 'rejected')
+  const pastas = readdirSync(registros).filter(x => x.startsWith('agente-'))
+  assert.equal(pastas.length, 2)
+  const b = pastas.find(x => ler(join(registros, x, 'pedido.json')).opcoes.label === 'B')
+  assert.ok(ler(join(registros, b, 'captura.json')).fim)
+  assert.equal((await agent.encerrar()).intervencaoManual, true)
+})
+
+test('junction de estado apontando ao checkout é recusada antes de criar qualquer pasta nele', async () => {
+  const { rodarMissao } = await import('../codex/rodar.mjs')
+  const { raiz, git } = projeto(), externa = temp(), alias = join(externa, 'alias')
+  symlinkSync(raiz, alias, process.platform === 'win32' ? 'junction' : 'dir')
+  await assert.rejects(rodarMissao({ projeto: raiz, args: argsMissao, pastaEstado: join(alias, 'estado-indevido') }), /fora do repositório/)
+  assert.ok(!existsSync(join(raiz, 'estado-indevido')))
+  assert.equal(git('status', '--porcelain'), '')
 })
