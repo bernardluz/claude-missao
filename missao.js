@@ -813,12 +813,18 @@ async function implementar(features, fase) {
     let mensagem = r.mensagem
     for (const a of (r.naoSao ?? []).map(normalizar)) sujeiraVista.add(a)
     if (arquivos.size === 0) {
-      // Só correção pode sair sem mudança; feature original precisa entregar algo.
-      if (r.jaResolvido && fase === 'Corrigir') {
-        resultados.push({ feature: f.titulo, ...r })
+      // Já resolvido no código (ex.: feature que só confirma com teste o que já existe, e o teste já existe): conta
+      // como concluída sem commit e segue. Feature original assim vira decisão assumida, para revisar no fim.
+      if (r.jaResolvido) {
+        resultados.push({ feature: f.titulo, ...r, semCommit: true })
+        if (fase !== 'Corrigir') {
+          const decisao = `já resolvida no código (${f.titulo}): ${r.resumo ?? 'sem mudança'}`
+          if (!decisoesAssumidas.includes(decisao)) decisoesAssumidas.push(decisao)
+          log(`${f.titulo}: já resolvida no código, concluída sem commit`)
+        }
         continue
       }
-      return falhou(r.jaResolvido ? 'feature original voltou sem mudança (jaResolvido)' : 'worker não declarou arquivos alterados.' + sujo)
+      return falhou('worker não declarou arquivos alterados.' + sujo)
     }
 
     let anteriores = []

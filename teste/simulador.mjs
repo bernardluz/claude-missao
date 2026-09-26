@@ -26,6 +26,7 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   naoSao, mensagem   { [label]: valor } o que esse worker devolve nesses campos
 //   semArquivos        worker não declara arquivos
 //   jaResolvidoCorrecao correções voltam jaResolvido
+//   jaResolvidoFeature { [feature]: true } essa feature original volta jaResolvido, sem arquivos
 //   branchNaConferencia branch devolvida pela conferência (simula troca de branch)
 //   commitDeFora       { [label]: sha } outra sessão commita os próprios arquivos logo depois desse agente
 //   commitDeForaTudo   { [label]: sha } outra sessão faz `git commit -a` logo depois desse agente e leva o diff
@@ -212,6 +213,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (o.jaResolvidoCorrecao && opt.phase === 'Corrigir' && !l.includes('ajuste')) {
       return { concluida: true, jaResolvido: true, arquivos: [], resumo: 'já resolvido' }
     }
+    if (o.jaResolvidoFeature?.[l]) return { concluida: true, jaResolvido: true, arquivos: [], resumo: 'o teste já existe' }
     const daFeature = o.arquivosDaFeature?.[l.split(' · ')[0]]
     estado.sujo = daFeature ?? true
     const declarados = l.includes(' · ajuste ') ? o.arquivosAjuste ?? daFeature ?? arquivos : daFeature ?? arquivos

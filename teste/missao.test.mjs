@@ -53,6 +53,18 @@ describe('fluxo principal', () => {
     assert.match(r.prompt('F2 · ajuste 1'), /o commit falhou \(gate ou hook\): saida=1\nlint falhou/)
   })
 
+  test('feature original já resolvida no código conta como concluída sem commit, vira decisão assumida e segue', async () => {
+    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.commits, 2)
+    assert.equal(r.contar('revisão: F1'), 0)
+    assert.equal(r.contar('commit: F1'), 0)
+    assert.deepEqual(r.resultado.decisoesAssumidas, ['já resolvida no código (F1): o teste já existe'])
+    const f1 = r.resultado.relatorio.flatMap(x => x.features ?? []).find(x => x.feature === 'F1')
+    assert.equal(f1.jaResolvido, true)
+    assert.equal(f1.semCommit, true)
+  })
+
   test('worker sem arquivos declarados para logo', async () => {
     const r = await rodar(plano(), { semArquivos: true })
     assert.match(r.resultado.motivo, /não declarou arquivos/)
