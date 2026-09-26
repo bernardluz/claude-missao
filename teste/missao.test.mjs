@@ -23,7 +23,7 @@ describe('fluxo principal', () => {
     const r = await rodar(plano())
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.commits, 3)
-    assert.equal(r.agentes, 3 + 4 * 3 + 8 * 2 + 5)
+    assert.equal(r.agentes, 3 + 5 * 3 + 8 * 2 + 5)
     assert.equal(r.contar('suíte completa'), 1)
     assert.match(r.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${r.agentes} agentes`))
     assert.equal(r.contar('revisão: F'), 3)
@@ -50,7 +50,7 @@ describe('fluxo principal', () => {
     const r = await rodar(plano(), { gate: { F2: 1 } })
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.contar('F2 · ajuste'), 1)
-    assert.match(r.prompt('F2 · ajuste 1'), /gate do commit falhou/)
+    assert.match(r.prompt('F2 · ajuste 1'), /o commit falhou \(gate ou hook\): saida=1\nlint falhou/)
   })
 
   test('worker sem arquivos declarados para logo', async () => {
@@ -67,8 +67,10 @@ describe('conferência logo depois do commit', () => {
     const [f1, f2] = r.resultado.relatorio[0].features.map(x => x.commit)
     for (const [feature, antes] of [['F1', 'base0000'], ['F2', f1]]) {
       const i = ordem.indexOf(`commit: ${feature}`)
+      // leitura antes do commit, o commit e a conferência depois dele, todas a partir do HEAD anterior
+      assert.equal(ordem[i - 1], 'conferência', feature)
       assert.equal(ordem[i + 1], 'conferência', feature)
-      assert.match(r.chamadas[i + 1].prompt, new RegExp(`node \\.claude/missao/git-estado\\.mjs ${antes}\``), feature)
+      for (const j of [i - 1, i + 1]) assert.match(r.chamadas[j].prompt, new RegExp(`node \\.claude/missao/git-estado\\.mjs ${antes}\``), feature)
     }
     assert.notEqual(f1, f2)
   })
@@ -100,7 +102,8 @@ describe('conferência logo depois do commit', () => {
   })
 
   test('commit de fora que toca arquivo da missão: aceito, registrado e revisado no scrutiny e na caça', async () => {
-    const r = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['x/a.js'] })
+    // F2 mexe só em y/c.js; o commit de fora, no meio dela, toca x/a.js, que F1 já commitou.
+    const r = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['x/a.js'], arquivosDaFeature: { F2: ['y/c.js'] } })
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.contar('commit de fora'), 0)
     assert.ok(r.logs.some(l => /^commit de fora aceito, toca a missão: fora0001\. .*x\/a\.js/.test(l)))
@@ -113,52 +116,88 @@ describe('conferência logo depois do commit', () => {
     assert.doesNotMatch(r.prompt('revisão: M2'), revise)
   })
 
-  test('commit de fora que leva o diff da feature: a feature conta como concluída e a missão segue', async () => {
+  test('commit que leva o diff da feature, só com arquivos da lista, é da feature e nunca de fora', async () => {
     const estado = { git: ['base0000'], sujo: false }
     const r = await rodar(plano(), { commitDeForaTudo: { 'revisão: F1': 'fora0001' }, arquivosDeFora: ['x/a.js'] }, estado)
     assert.equal(r.resultado.concluido, true)
-    assert.ok(r.logs.some(l => l.startsWith('commit de fora levou o diff da feature "F1": fora0001')))
-    assert.equal(r.contar('F1'), 1)
-    assert.deepEqual(r.resultado.relatorio[0].features.map(x => x.feature), ['F1', 'F2'])
-    assert.deepEqual(r.resultado.deForaTocando[0], { milestone: 'M1', commits: ['fora0001'], arquivos: ['x/a.js'] })
+    assert.equal(r.resultado.relatorio[0].features[0].commit, 'fora0001')
+    assert.equal(r.contar('commit: F1'), 0)
+    assert.deepEqual(r.resultado.deForaTocando, [])
+    assert.ok(!r.resultado.retomar?.deFora?.includes('fora0001'))
     assert.equal(r.commits, 3)
   })
 
-  test('diff da feature sumiu sem ir para o commit de fora: para como antes, sem mandar descartar diff', async () => {
+  test('diff da feature sumiu sem ir para commit nenhum: o commit de fora é aceito e a missão para pela feature', async () => {
     const r = await rodar(plano(), { commitDeForaTudo: { 'revisão: F1': 'fora0001' } })
-    assert.match(r.resultado.motivo, /não commitou \(nada a commitar\), e base0000\.\.HEAD tem commit de fora da missão: fora0001,/)
-    assert.match(r.resultado.motivo, /inclua também "F1" em retomar\.concluidas/)
-    assert.doesNotMatch(r.resultado.motivo, /ficou sem commit/)
-    assert.deepEqual(r.resultado.retomar.concluidas, [])
+    assert.equal(r.resultado.parouEm, 'M1')
+    assert.match(r.resultado.motivo, /o diff da feature não foi commitado \(nenhum arquivo da lista com mudança pendente\)/)
+    assert.ok(r.logs.some(l => l.startsWith('commit de fora aceito, não toca a missão: fora0001')))
+    assert.deepEqual(r.resultado.retomar.deFora, ['fora0001'])
   })
 
-  test('commit de fora com o diff da feature ainda na árvore: a parada lembra do diff', async () => {
-    const r = await rodar(plano(), { commitDeFora: { 'revisão: F1': 'fora0001' }, arquivosDeFora: ['x/a.js'], falhaCommit: { F1: 'index.lock existe' } })
-    assert.match(r.resultado.motivo, /não commitou \(index\.lock existe\), e base0000\.\.HEAD tem commit de fora da missão: fora0001,/)
-    assert.match(r.resultado.motivo, /O diff da feature ficou sem commit/)
+  test('agente que não commita, com commit de fora que não levou o diff: aceita o de fora e repete o commit', async () => {
+    const r = await rodar(plano(), { commitDeFora: { 'revisão: F1': 'fora0001' }, falhaCommit: { F1: 'index.lock existe' } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('commit: F1'), 2)
+    assert.ok(r.logs.some(l => l.startsWith('commit de fora aceito, não toca a missão: fora0001')))
+    assert.ok(r.logs.some(l => /^F1: arquivos da lista ainda sem commit \(x\/a\.js\); repetindo o commit$/.test(l)))
+  })
+
+  test('queda do agente de commit com commit de fora no intervalo: aceita o de fora e repete o commit', async () => {
+    const r = await rodar(plano(), { quedas: { 'commit: F1': 1 }, efeitoDaQueda: { 'commit: F1': 'commitaFora' } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('commit: F1'), 2)
+    assert.ok(r.resultado.retomar === undefined)
+    assert.ok(r.logs.some(l => l.startsWith('commit de fora aceito, não toca a missão: fora0009')))
   })
 
   test('SHA declarado que não está no git não entra no retomar', async () => {
-    const r = await rodar(plano(), { shaErrado: { F1: 'naoexiste' } })
-    assert.match(r.resultado.motivo, /declarou naoexiste, mas base0000\.\.HEAD tem sha00001/)
+    const r = await rodar(plano(), { shaErrado: { F1: 'abcdef1' } })
+    assert.match(r.resultado.motivo, /declarou abcdef1, mas base0000\.\.HEAD tem sha00001/)
     assert.deepEqual(r.resultado.retomar.concluidas, [])
     assert.deepEqual(r.resultado.retomar.commits, [])
   })
 
-  test('commit com arquivo que a revisão não viu fica fora do retomar até o usuário decidir', async () => {
+  test('arquivo alterado e não declarado vira ajuste antes do commit; declarado, vai no commit', async () => {
+    const r = await rodar(plano(), { arquivosGit: ['x/a.js', 'y/b.js'], arquivosAjuste: ['x/a.js', 'y/b.js'] })
+    assert.equal(r.resultado.concluido, true)
+    assert.match(r.prompt('F1 · ajuste 1'), /mudanças novas na árvore fora da lista da feature: y\/b\.js\. Se forem desta feature \(inclusive a origem de uma renomeação\), declare-as/)
+    assert.match(r.prompt('commit: F1'), /git add -- 'x\/a\.js' 'y\/b\.js'/)
+    // Não declarado e não desfeito: a revisão não fecha e nada é commitado.
+    const teimoso = await rodar(plano(), { arquivosGit: ['x/a.js', 'y/b.js'] })
+    assert.match(teimoso.resultado.motivo, /não fechou após 3 rodadas de ajuste: mudanças novas na árvore fora da lista/)
+    assert.equal(teimoso.contar('commit: F1'), 0)
+  })
+
+  test('renomeação declarada só pelo destino vira ajuste; com origem e destino, o commit leva os dois', async () => {
+    const r = await rodar(plano(), { arquivos: ['x/novo.js'], arquivosGit: ['x/velho.js -> x/novo.js'], arquivosAjuste: ['x/velho.js', 'x/novo.js'] })
+    assert.equal(r.resultado.concluido, true)
+    assert.match(r.prompt('F1 · ajuste 1'), /fora da lista da feature: x\/velho\.js\./)
+    assert.match(r.prompt('commit: F1'), /git add -- 'x\/novo\.js' 'x\/velho\.js'|git add -- 'x\/velho\.js' 'x\/novo\.js'/)
+  })
+
+  test('commit que o próprio worker fez, com arquivo fora da lista, fica fora do retomar até o usuário decidir', async () => {
     const estado = { git: ['base0000'], sujo: false }
-    const opcoes = { arquivosGit: ['x/a.js', 'y/b.js'] }
+    const opcoes = { arquivosGit: ['x/a.js', 'y/b.js'], workerCommita: { F1: true } }
     const p1 = await rodar(plano(), opcoes, estado)
     assert.match(p1.resultado.motivo, /commit de "F1", sha00001, tem arquivos fora da lista revisada: y\/b\.js\. Ele ficou fora do retomar/)
+    assert.equal(p1.contar('commit: F1'), 0)
     const retomar = p1.resultado.retomar
     assert.deepEqual(retomar.concluidas, [])
     assert.deepEqual(retomar.commits, [])
-    const semAjuste = await rodar(plano({ retomar }), opcoes, estado)
-    assert.match(semAjuste.resultado.motivo, /repositório mudou desde a parada/)
     const aceito = { ...retomar, commits: estado.git.slice(1), head: estado.git.at(-1), concluidas: ['F1'] }
     const p2 = await rodar(plano({ retomar: aceito }), {}, estado)
     assert.equal(p2.resultado.concluido, true)
     assert.equal(p2.contar('F1'), 0)
+  })
+
+  test('commit que o próprio worker fez, só com arquivos da lista, é conferido como da feature', async () => {
+    const r = await rodar(plano(), { workerCommita: { F1: true } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('commit: F1'), 0)
+    assert.equal(r.resultado.relatorio[0].features[0].commit, 'sha00001')
+    assert.deepEqual(r.resultado.deForaTocando, [])
+    assert.match(r.prompt('revisão: F1'), /git diff base0000 -- <esses caminhos>/)
   })
 
   test('pasta nova declarada como no git status cobre os arquivos de dentro', async () => {
@@ -187,27 +226,25 @@ describe('conferência logo depois do commit', () => {
     assert.equal(outroModelo.chamadas.find(c => c.label === 'conferência').model, 'sonnet')
   })
 
-  test('conferência que não volta ou branch trocada logo depois do commit param a missão', async () => {
+  test('leitura do git que não volta ou branch trocada antes do commit param a missão', async () => {
     const semLeitura = await rodar(plano(), { quedas: { conferência: 3 } })
-    assert.match(semLeitura.resultado.motivo, /conferência logo depois do commit de "F1" não retornou; o commit declarado, sha00001/)
-    assert.deepEqual(semLeitura.resultado.retomar.concluidas, ['F1'])
+    assert.match(semLeitura.resultado.motivo, /não foi possível ler o repositório antes do commit/)
+    assert.deepEqual(semLeitura.resultado.retomar.arquivosPendentes, ['x/a.js'])
     const outraBranch = await rodar(plano(), { branchNaConferencia: 'outra' })
-    assert.match(outraBranch.resultado.motivo, /branch mudou para "outra" logo depois do commit de "F1"/)
+    assert.match(outraBranch.resultado.motivo, /branch mudou para "outra" antes do commit de "F1"/)
   })
 
 })
 
 describe('agente de commit', () => {
-  test('recusa do harness para a missão, mesmo junto de gate, sem virar ajuste', async () => {
-    for (const recusa of [{ motivo: 'Credential Leakage' }, { motivo: 'Credential Leakage', gateFalhou: true }]) {
-      const r = await rodar(plano(), { recusa: { F1: recusa } })
-      assert.equal(r.resultado.parouEm, 'M1')
-      assert.match(r.resultado.motivo, /recusou um comando do agente de commit.*: Credential Leakage\./)
-      assert.match(r.resultado.motivo, /ficou sem commit/)
-      assert.equal(r.contar('F1 · ajuste'), 0)
-      assert.equal(r.contar('commit: F1'), 1)
-      assert.equal(r.commits, 0)
-    }
+  test('recusa do harness para a missão, sem virar ajuste', async () => {
+    const r = await rodar(plano(), { recusa: { F1: { motivo: 'Credential Leakage' } } })
+    assert.equal(r.resultado.parouEm, 'M1')
+    assert.match(r.resultado.motivo, /recusou o comando de commit, e a missão não contorna recusa: Credential Leakage\./)
+    assert.match(r.resultado.motivo, /ficou sem commit/)
+    assert.equal(r.contar('F1 · ajuste'), 0)
+    assert.equal(r.contar('commit: F1'), 1)
+    assert.equal(r.commits, 0)
   })
 
   test('recusa depois do commit: o commit entra no retomar e a missão para', async () => {
@@ -220,19 +257,22 @@ describe('agente de commit', () => {
     assert.equal(r.contar('F2'), 0)
   })
 
-  test('prompt proíbe contornar recusa', async () => {
-    const p = (await rodar(plano())).prompt('commit: F1')
-    assert.match(p, /recusar uma ferramenta ou um comando, não tente de outro jeito/)
-    assert.match(p, /devolva recusado=true, o texto da recusa em motivo e commitado=false, ou commitado=true com o SHA/)
+  test('agente de commit só roda o comando pronto, e o worker nunca commita', async () => {
+    const r = await rodar(plano())
+    const p = r.prompt('commit: F1')
+    assert.match(p, /Rode exatamente o comando abaixo, uma vez/)
+    assert.match(p, /recusar o comando, não tente de outro jeito: devolva recusado=true/)
+    assert.equal(r.chamadas.find(c => c.label === 'commit: F1').model, 'haiku')
+    assert.match(r.prompt('F1'), /Não rode `git commit`, `git add`, `git stash`, `git reset` nem `git checkout -- \.`: quem commita é a missão/)
   })
 
   test('prompts que rodam build, testes ou gates mandam a saída para arquivo, nunca por pipe', async () => {
     const r = await rodar(plano(), { revisaoFeature: { F1: [1, 0] } })
-    for (const label of ['F1', 'F1 · ajuste 1', 'revisão: F1', 'commit: F1', 'revisão: M1', 'testes: M1', 'suíte completa']) {
+    for (const label of ['F1', 'F1 · ajuste 1', 'revisão: F1', 'revisão: M1', 'testes: M1', 'suíte completa']) {
       assert.match(r.prompt(label), /<comando> > "\$log" 2>&1; echo "saida=\$\?"; tail -40 "\$log"/, label)
       assert.match(r.prompt(label), /Nunca leia a saída por pipe \(`\| tail`, `\| head`, `\| tee`\): um daemon/, label)
     }
-    assert.match(r.prompt('commit: F1'), /git commit -F <arquivo> -- <paths> > "\$log" 2>&1; echo "saida=\$\?"; tail -40 "\$log"/)
+    assert.match(r.prompt('commit: F1'), /git add -- 'x\/a\.js' > "\$log" 2>&1 && git commit -F "\$msg" -- 'x\/a\.js' >> "\$log" 2>&1; echo "saida=\$\?"; tail -60 "\$log"/)
   })
 })
 
@@ -358,10 +398,12 @@ describe('quedas de agente', () => {
     assert.match(tentativas[1].prompt, /trabalho parcial/)
   })
 
-  test('worker cai mexendo no histórico: para com o sha e como aceitar commit de fora', async () => {
+  test('worker cai com commit novo no intervalo: não para, repete e a conferência classifica o commit', async () => {
     const r = await rodar(plano(), { quedas: { F2: 1 }, efeitoDaQueda: { F2: 'commitaOrfao' } })
-    assert.match(r.resultado.motivo, /histórico mudou \(.*1 commit\(s\) novo\(s\): orfao000\), por commit dele ou de fora da missão/)
-    assert.match(r.resultado.motivo, /retomar\.head o HEAD real, orfao000/)
+    assert.equal(r.resultado.concluido, true)
+    assert.ok(r.logs.some(l => /^F2: agente caiu com commit\(s\) novo\(s\) no intervalo \(orfao000\); repetindo/.test(l)))
+    assert.ok(r.logs.some(l => l.startsWith('commit de fora aceito, não toca a missão: orfao000')))
+    assert.equal(r.contar('F2'), 2 + r.contar('F2 ·'))
   })
 
   test('agente de commit cai depois de commitar: adota o commit', async () => {
@@ -406,10 +448,20 @@ describe('retomada', () => {
     assert.match(p2.prompt('revisão: M1'), new RegExp(`base0000\\.\\.${p1.resultado.retomar.head}`))
   })
 
-  test('recusa retomar se apareceu commit alheio e devolve o retomar original', async () => {
+  test('commit alheio entre a parada e a retomada é aceito como de fora e a missão segue', async () => {
     const estado = { git: ['base0000'], sujo: false }
     const p1 = await rodar(plano(), { validacao: [2, 2] }, estado)
     estado.git.push('alheio00')
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.ok(p2.logs.some(l => l.startsWith('commit de fora aceito, não toca a missão: alheio00')))
+    assert.equal(p2.contar('F1') + p2.contar('F2'), 0)
+  })
+
+  test('retomada recusa quando o histórico da missão foi reescrito', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { validacao: [2, 2] }, estado)
+    estado.git.splice(1, 1, 'reescrit')
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
     assert.match(p2.resultado.motivo, /repositório mudou desde a parada/)
     assert.deepEqual(p2.resultado.retomar, p1.resultado.retomar)
@@ -463,7 +515,7 @@ describe('configuração do projeto', () => {
     assert.equal(r.tipo('contexto do plano'), 'explorer')
     assert.match(r.prompt('F1'), /Siga docs\/testes\.md/)
     assert.match(r.prompt('F1'), /exigida pelo AGENTS\.md/)
-    assert.match(r.prompt('commit: F1'), /PROJ_SKIP_\*/)
+    assert.match(r.prompt('F1'), /PROJ_SKIP_\*/)
   })
 
   test('revisor por pasta vale com caminhos absolutos do Windows e do Git Bash', async () => {
@@ -494,10 +546,12 @@ describe('configuração do projeto', () => {
     }
   })
 
-  test('args.config ajusta textos numa execução', async () => {
-    const r = await rodarCom(CONFIG_EXEMPLO, plano({ config: { formatoCommit: 'feat(x): y', idioma: 'en' } }))
-    assert.match(r.prompt('commit: F1'), /mensagem feat\(x\): y em en/)
-    assert.match(r.prompt('commit: F1'), /PROJ_SKIP_\*/)
+  test('args.config ajusta textos numa execução; a mensagem do worker vai no commit', async () => {
+    const r = await rodarCom(CONFIG_EXEMPLO, plano({ config: { formatoCommit: 'feat(x): y', idioma: 'en' } }), { mensagem: { F1: 'feat(x): adiciona a' } })
+    assert.match(r.prompt('F1'), /mensagem do commit da feature, feat\(x\): y em en\./)
+    assert.match(r.prompt('F1'), /PROJ_SKIP_\*/)
+    assert.match(r.prompt('commit: F1'), /<<'MSG_MISSAO'\nfeat\(x\): adiciona a\nMSG_MISSAO/)
+    assert.match(r.prompt('commit: F2'), /<<'MSG_MISSAO'\nfeat: F2\nMSG_MISSAO/)
   })
 })
 
@@ -785,7 +839,7 @@ describe('revisão: retomada e commits de fora', () => {
 
   test('commit de fora que toca a missão vai no retomar e volta ao scrutiny do milestone na retomada', async () => {
     const estado = { git: ['base0000'], sujo: false }
-    const p1 = await rodar(plano(), { commitDeFora: { F3: 'fora0001' }, arquivosDeFora: ['x/a.js'], validacao: [0, 2, 2] }, estado)
+    const p1 = await rodar(plano(), { commitDeFora: { F3: 'fora0001' }, arquivosDeFora: ['x/a.js'], arquivosDaFeature: { F3: ['y/c.js'] }, validacao: [0, 2, 2] }, estado)
     assert.equal(p1.resultado.parouEm, 'M2')
     assert.deepEqual(p1.resultado.retomar.deForaTocando, [{ milestone: 'M2', commits: ['fora0001'], arquivos: ['x/a.js'] }])
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
@@ -1222,13 +1276,11 @@ describe('árvore suja não para a missão', () => {
     assert.deepEqual(r.resultado.sujeiraCommitada, [])
   })
 
-  test('agente de commit recebe só a lista do worker e a ordem de não tocar no resto', async () => {
+  test('agente de commit recebe só a lista do worker; a sujeira de antes não entra no comando', async () => {
     const r = await rodar(plano(), { arquivos: ['x/a.js', 'x/b.js'] }, comSujeira())
     const p = r.prompt('commit: F1')
-    assert.match(p, /Arquivos da feature: x\/a\.js, x\/b\.js\./)
-    assert.match(p, /`git add -- <paths>` e `git commit -F <arquivo> -- <paths>`, nunca `git add -A` nem `git add \.`/)
-    assert.match(p, /outras mudanças \(de antes da missão ou de outras sessões\): não são desta feature; não as inclua, não as desfaça, não as apague/)
-    assert.doesNotMatch(p, /notas\.txt/)
+    assert.match(p, /git add -- 'x\/a\.js' 'x\/b\.js' > "\$log" 2>&1 && git commit -F "\$msg" -- 'x\/a\.js' 'x\/b\.js'/)
+    assert.doesNotMatch(p, /notas\.txt|rascunho/)
     assert.match(r.prompt('revisão: F1'), /O diff desta feature são os arquivos x\/a\.js, x\/b\.js.*Outras mudanças na árvore não são desta feature: ignore-as/)
   })
 
@@ -1241,13 +1293,20 @@ describe('árvore suja não para a missão', () => {
     assert.deepEqual(estado.alheios, [' M notas.txt'])
   })
 
-  test('sujeira alheia surgindo no meio da missão não para nem vira arquivo fora da lista', async () => {
+  test('sujeira alheia surgindo no meio da missão não para nem entra nos commits', async () => {
     const estado = { git: ['base0000'], sujo: false }
-    const r = await rodar(plano(), { suja: { 'commit: F1': 'outra/sessao.js', 'testes: M1': 'outra/depois.js', F3: 'outra/durante.js' } }, estado)
+    const r = await rodar(plano(), {
+      suja: { 'commit: F1': 'outra/sessao.js', 'testes: M1': 'outra/depois.js', F3: 'outra/durante.js' },
+      naoSao: { 'F3 · ajuste 1': ['outra/durante.js'] },
+    }, estado)
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.commits, 3)
-    assert.equal(r.contar('F1 · ajuste') + r.contar('F2 · ajuste') + r.contar('F3 · ajuste'), 0)
+    // A que surge depois de um commit ou entre milestones fica registrada; a que surge durante o worker volta para ele,
+    // que diz em naoSao que não é dele.
+    assert.equal(r.contar('F1 · ajuste') + r.contar('F2 · ajuste'), 0)
+    assert.match(r.prompt('F3 · ajuste 1'), /fora da lista da feature: outra\/durante\.js\..*liste-as em naoSao/)
     assert.deepEqual(estado.alheios.sort(), [' M outra/depois.js', ' M outra/durante.js', ' M outra/sessao.js'])
+    for (const c of ['commit: F1', 'commit: F2', 'commit: F3']) assert.doesNotMatch(r.prompt(c), /outra\//, c)
   })
 
   test('linha de base vai no retomar e soma a sujeira da retomada', async () => {
@@ -1265,6 +1324,19 @@ describe('árvore suja não para a missão', () => {
     assert.equal(r.resultado.concluido, true)
     assert.doesNotMatch(r.chamadas.filter(c => c.label === 'F2')[1].prompt, /caiu no meio/)
     const parcial = await rodar(plano(), { quedas: { F2: 1 }, efeitoDaQueda: { F2: 'suja' } }, comSujeira())
-    assert.match(parcial.chamadas.filter(c => c.label === 'F2')[1].prompt, /não estavam na árvore antes da missão \(notas\.txt, rascunho\/ideia\.md\) são trabalho parcial/)
+    assert.match(parcial.chamadas.filter(c => c.label === 'F2')[1].prompt, /não estavam na árvore antes dela \(notas\.txt, rascunho\/ideia\.md\) são trabalho parcial/)
+  })
+})
+
+describe('linha de base e diff pendente na parada', () => {
+  test('o diff da feature que ficou sem commit na parada não vira linha de base na retomada', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { revisaoFeature: { F1: [1, 1, 1, 1] } }, estado)
+    assert.equal(p1.resultado.parouEm, 'M1')
+    assert.deepEqual(p1.resultado.retomar.arquivosPendentes, ['x/a.js'])
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.ok(!p2.logs.some(l => /mudança\(s\) não commitada\(s\) de antes/.test(l)))
+    assert.deepEqual(p2.resultado.retomar?.sujeiraInicial ?? [], [])
   })
 })

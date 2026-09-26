@@ -21,13 +21,16 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   suiteAmbiente      a suíte falha por ambiente
 //   gate               { [feature]: vezes que o gate falha }
 //   quedas             { [label]: vezes que o agente devolve null }
-//   efeitoDaQueda      { [label]: 'commita' | 'suja' | 'commitaOrfao' }
+//   efeitoDaQueda      { [label]: 'commita' | 'suja' | 'commitaOrfao' | 'commitaFora' }
+//   arquivosDaFeature  { [feature]: [caminhos] } o que essa feature declara e muda (padrão: arquivos/arquivosGit)
+//   naoSao, mensagem   { [label]: valor } o que esse worker devolve nesses campos
 //   semArquivos        worker não declara arquivos
 //   jaResolvidoCorrecao correções voltam jaResolvido
 //   branchNaConferencia branch devolvida pela conferência (simula troca de branch)
 //   commitDeFora       { [label]: sha } outra sessão commita os próprios arquivos logo depois desse agente
 //   commitDeForaTudo   { [label]: sha } outra sessão faz `git commit -a` logo depois desse agente e leva o diff
 //   suja               { [label]: caminho } outra sessão deixa mudança não commitada nesse caminho depois desse agente
+//   workerCommita      { [label]: true } esse worker commita o próprio diff (proibido, mas acontece)
 //   recusa             { [feature]: { motivo, commita?, ...campos } } o harness recusa um comando do agente de
 //                      commit; com commita, a recusa vem depois do commit
 //   shaErrado          { [feature]: sha } o agente de commit commita, mas declara outro SHA
@@ -83,8 +86,10 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   const logs = []
   const novoSha = () => `sha${String(estado.git.length).padStart(5, '0')}`
   const caminhoDe = linha => linha.slice(3)
+  // estado.sujo: true (todos os arquivos que o git lista), lista dos que sobraram depois de um commit, ou false.
+  const pendentesDoWorker = () => (estado.sujo === true ? arquivosGit : Array.isArray(estado.sujo) ? estado.sujo : [])
   const pendencias = () => {
-    const doWorker = estado.sujo ? arquivosGit.map(a => ` M ${a}`) : []
+    const doWorker = pendentesDoWorker().map(a => (a.includes(' -> ') ? `R  ${a}` : ` M ${a}`))
     return [...doWorker, ...estado.alheios.filter(l => !doWorker.some(d => caminhoDe(d) === caminhoDe(l)))]
   }
   const limpo = () => pendencias().length === 0
@@ -98,6 +103,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       if (efeito === 'commita') { estado.git.push(novoSha()); estado.sujo = false }
       if (efeito === 'suja') estado.sujo = true
       if (efeito === 'commitaOrfao') estado.git.push('orfao000')
+      if (efeito === 'commitaFora') { estado.git.push('fora0009'); estado.porSha ??= {}; estado.porSha.fora0009 = arquivosDeFora }
       return null
     }
     if (l === 'contexto do plano') return { areas: o.areas ?? [] }
@@ -180,26 +186,35 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       return { aprovado: n === 0, problemas: problemas(n, 'r') }
     }
     if (l.startsWith('commit: ')) {
+      // O agente só roda o comando pronto: o simulador commita exatamente os caminhos do `git add -- ...`.
       const f = l.slice(8)
       const { commita: recusaDepois, ...recusa } = o.recusa?.[f] ?? {}
-      if (o.recusa?.[f] && !recusaDepois) return { commitado: false, recusado: true, ...recusa }
-      // Commita só os arquivos da lista: a sujeira alheia fica, salvo arquivo da lista que já estava sujo (vai inteiro).
-      if (gate[f] > 0) { gate[f]--; return { commitado: false, gateFalhou: true, motivo: 'lint' } }
-      if (falhaCommit[f]) { const motivo = falhaCommit[f]; delete falhaCommit[f]; return { commitado: false, motivo } }
-      if (!estado.sujo) return { commitado: false, motivo: 'nada a commitar' }
+      if (o.recusa?.[f] && !recusaDepois) return { recusado: true, ...recusa }
+      const headAtual = () => `head=${estado.git.at(-1)}`
+      if (gate[f] > 0) { gate[f]--; return { saida: `saida=1\nlint falhou\n${headAtual()}` } }
+      if (falhaCommit[f]) { const motivo = falhaCommit[f]; delete falhaCommit[f]; return { saida: motivo } }
+      const lista = [...(/git add -- (.+?) > "\$log"/.exec(prompt)?.[1] ?? '').matchAll(/'([^']*)'/g)].map(x => x[1])
+      const doWorker = pendentesDoWorker()
+      const levados = doWorker.filter(p => p.split(' -> ').every(x => lista.includes(x)))
+      const alheiosLevados = estado.alheios.map(caminhoDe).filter(p => lista.includes(p))
+      if (!levados.length && !alheiosLevados.length) return { saida: `saida=1\nnothing to commit\n${headAtual()}` }
       const sha = novoSha()
       estado.git.push(sha)
-      estado.sujo = false
-      estado.alheios = estado.alheios.filter(l => !arquivosGit.includes(caminhoDe(l)))
-      if (recusaDepois) return { commitado: true, commit: sha, recusado: true, ...recusa }
-      return { commitado: true, commit: o.shaErrado?.[f] ?? sha }
+      estado.porSha ??= {}
+      estado.porSha[sha] = [...new Set([...levados.flatMap(p => p.split(' -> ')), ...alheiosLevados])]
+      const resto = doWorker.filter(p => !levados.includes(p))
+      estado.sujo = resto.length ? resto : false
+      estado.alheios = estado.alheios.filter(x => !alheiosLevados.includes(caminhoDe(x)))
+      if (recusaDepois) return { recusado: true, ...recusa, saida: `saida=0\n${headAtual()}` }
+      return { saida: `saida=0\n[develop ${sha}]\nhead=${o.shaErrado?.[f] ?? sha}` }
     }
     // worker, ajuste ou correção
     if (o.jaResolvidoCorrecao && opt.phase === 'Corrigir' && !l.includes('ajuste')) {
       return { concluida: true, jaResolvido: true, arquivos: [], resumo: 'já resolvido' }
     }
-    estado.sujo = true
-    const declarados = l.includes(' · ajuste ') ? o.arquivosAjuste ?? arquivos : arquivos
+    const daFeature = o.arquivosDaFeature?.[l.split(' · ')[0]]
+    estado.sujo = daFeature ?? true
+    const declarados = l.includes(' · ajuste ') ? o.arquivosAjuste ?? daFeature ?? arquivos : daFeature ?? arquivos
     return { concluida: true, arquivos: o.semArquivos ? [] : declarados, resumo: 'ok' }
   }
   // Efeitos de fora do agente (outra sessão, crash do bash) acontecem depois que ele responde ou cai.
@@ -207,8 +222,17 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     const r = await responder(prompt, opt)
     const l = opt.label
     if (r && o.aprendizados?.[l]) r.aprendizados = o.aprendizados[l]
+    if (r && o.naoSao?.[l]) r.naoSao = o.naoSao[l]
+    if (r && o.mensagem?.[l]) r.mensagem = o.mensagem[l]
     if (r && deFora[l]) { estado.git.push(deFora[l]); delete deFora[l] }
     if (r && deForaTudo[l]) { estado.git.push(deForaTudo[l]); estado.sujo = false; delete deForaTudo[l] }
+    if (r && o.workerCommita?.[l] && estado.sujo) {
+      const sha = novoSha()
+      estado.git.push(sha)
+      estado.porSha ??= {}
+      estado.porSha[sha] = pendentesDoWorker()
+      estado.sujo = false
+    }
     if (r && suja[l]) { estado.alheios.push(` M ${suja[l]}`); delete suja[l] }
     return r
   }

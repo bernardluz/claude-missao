@@ -148,20 +148,19 @@ const RESULTADO_FEATURE = {
     resumo: { type: 'string' },
     aprendizados: { type: 'array', items: { type: 'string' }, maxItems: 3 },
     testesRodados: { type: 'array', items: { type: 'string' } },
+    // Mudanças novas na árvore que o worker diz não ter feito (outra sessão): viram sujeira alheia.
+    naoSao: { type: 'array', items: { type: 'string' } },
+    // Mensagem do commit da feature, no formato e idioma do projeto; a missão a usa no commit.
+    mensagem: { type: 'string' },
   },
   required: ['concluida', 'resumo'],
 }
 
+// O agente de commit só roda o comando pronto e devolve a saída literal.
 const RESULTADO_COMMIT = {
   type: 'object',
-  properties: {
-    commitado: { type: 'boolean' },
-    commit: { type: 'string' },
-    gateFalhou: { type: 'boolean' },
-    recusado: { type: 'boolean' },
-    motivo: { type: 'string' },
-  },
-  required: ['commitado'],
+  properties: { saida: { type: 'string' }, recusado: { type: 'boolean' }, motivo: { type: 'string' } },
+  required: [],
 }
 
 // Script instalado no projeto pelo instalar.mjs (fonte: git-estado.mjs no claude-missao).
@@ -412,10 +411,15 @@ if (!preparo || !preparo.branch) {
 log(`Branch ${preparo.branch}, base ${preparo.head}`)
 // Linha de base: mudanças não commitadas que já existiam (na retomada, somadas às da parada). Ignoradas pela missão;
 // arquivo dela que um worker editar vai inteiro no commit e vira aviso em sujeiraCommitada.
+// O diff da feature que ficou sem commit na parada (retomar.arquivosPendentes) é da missão, não linha de base.
+const pendentesDaParada = Array.isArray(retomar?.arquivosPendentes) ? retomar.arquivosPendentes : []
 const sujeiraInicial = [...new Set([
   ...(Array.isArray(retomar?.sujeiraInicial) ? retomar.sujeiraInicial.filter(a => typeof a === 'string') : []),
-  ...caminhosPendentes(preparo),
+  ...caminhosPendentes(preparo).filter(a => !pendentesDaParada.includes(a)),
 ])]
+// Sujeira alheia já vista: linha de base, mais o que sobra na árvore fora da lista depois de cada commit e a cada
+// conferência. Mudança nova fora disso e fora da lista do worker volta para ele antes do commit.
+const sujeiraVista = new Set(sujeiraInicial)
 if (sujeiraInicial.length) log(`árvore com ${sujeiraInicial.length} mudança(s) não commitada(s) de antes: ficam fora dos commits (${sujeiraInicial.slice(0, 10).join(', ')})`)
 const sujeiraCommitada = Array.isArray(retomar?.sujeiraCommitada) ? [...retomar.sujeiraCommitada] : []
 
@@ -472,12 +476,13 @@ const planoTexto = pendentes.filter(m => !m.suite).map(m =>
 ).join('\n\n')
 
 const totalFeatures = pendentes.reduce((n, m) => n + m.features.length, 0)
-// preparo, pré-voo, conferência da retomada e contexto (se não veio do retomar); por feature: worker, revisão, commit e conferência; por
+// preparo, pré-voo, conferência da retomada e contexto (se não veio do retomar); por feature: worker, revisão, leitura do
+// git antes do commit, commit e conferência; por
 // milestone: prova de contrato, 2 conferências, 2 validadores, caça (um caçador por área, mais o agente que deriva as
 // áreas se o plano não as traz), UI/UX (desenho, ou o agente que detecta se há tela) e user testing se houver jornada; fim: caça final (com 2+ milestones, fora da
 // retomada na suíte), 2 conferências, suíte e aceite
 const porMilestone = m => 6 + (m.caca ? m.caca.length : 2) + (m.userTesting ? 1 : 0)
-const estimativa = 2 + (retomar ? 1 : 0) + (contexto.areas.length || !planoTexto ? 0 : 1) + 4 * totalFeatures +
+const estimativa = 2 + (retomar ? 1 : 0) + (contexto.areas.length || !planoTexto ? 0 : 1) + 5 * totalFeatures +
   pendentes.filter(m => !m.suite).reduce((n, m) => n + porMilestone(m), 0) +
   (milestones.length > 1 && !cacaFinalFeita ? 1 : 0) + 4
 log(`Estimativa mínima: ${estimativa} agentes a partir daqui (sem contar correções e retentativas)`)
@@ -578,75 +583,63 @@ function promptTrabalho(f, extra) {
   return montar(f.etapa ?? 'implementar',
     `Implemente a feature "${f.titulo}".\nSpec: ${f.spec}\n${extra}${blocoDesign(f.milestone)}\n` +
     `${TESTES}, e revise o próprio diff.\n` + SAIDA_EM_ARQUIVO + '\n' +
-    'NÃO faça commit nem stage: a revisão independente' +
+    'Não rode `git commit`, `git add`, `git stash`, `git reset` nem `git checkout -- .`: quem commita é a missão, ' +
+    'com a lista que você devolver, depois da revisão independente' +
     (CONFIG.regrasProjeto ? ` exigida pelo ${CONFIG.regrasProjeto}` : '') +
     ' é o próximo passo deste workflow e o commit vem depois dela. Não tente lançar revisor.\n' +
     'Devolva em `arquivos` todos os caminhos que você criou, alterou ou removeu, relativos à raiz do repositório ' +
-    '(como o `git status` mostra). A árvore pode ter mudanças de antes da missão ou de outras sessões: não as mexa ' +
+    '(como o `git status` mostra); em renomeação (`git mv`), declare origem e destino. Devolva em `mensagem` a mensagem ' +
+    `do commit da feature, ${CONFIG.formatoCommit} em ${CONFIG.idioma}.` +
+    ' A árvore pode ter mudanças de antes da missão ou de outras sessões: não as mexa ' +
     'nem as declare, salvo o que esta feature precisar mudar.\n' +
     'Se o problema já estiver resolvido no código atual e não houver o que mudar, devolva concluida=true e jaResolvido=true.\n' +
     'Se não concluir, não descarte mudanças: devolva concluida=false explicando o bloqueio.\n' +
     GIT_PROIBIDO, f.guias ?? [])
 }
 
-// Commit só depois da revisão aprovada; este agente nunca altera código.
-// Se cair depois de commitar, o commit é adotado apenas se for o único e tiver exatamente os arquivos da feature.
-// Devolve { commit, parar? }, { apontamento } ou { erro, semDiff? }. parar: motivo para parar depois de conferir o
-// commit. semDiff: o diff da feature não ficou pendente, então a parada não manda descartá-lo.
-async function commitar(f, arquivos, fase, antes) {
-  const chamar = aviso => agent(
-    `Faça UM commit atômico da feature "${f.titulo}", já revisada e aprovada. Arquivos da feature: ${[...arquivos].join(', ')}.\n` +
-    '- a árvore pode ter outras mudanças (de antes da missão ou de outras sessões): não são desta feature; não as ' +
-    'inclua, não as desfaça, não as apague;\n' +
-    '- inclua exatamente os caminhos da lista: `git add -- <paths>` e `git commit -F <arquivo> -- <paths>`, nunca ' +
-    '`git add -A` nem `git add .`; caminho da lista que não aparece no `git status` (revertido no ajuste) é ignorado;\n' +
-    `- mensagem ${CONFIG.formatoCommit} em ${CONFIG.idioma} descrevendo a feature, gravada em arquivo temporário FORA do repositório ` +
-    '(ex.: saída de `mktemp`), usada com `git commit -F <arquivo> -- <paths>` e apagada depois;\n' +
-    '- rode o commit com a saída em arquivo, nunca por pipe, porque os hooks rodam gates: ' +
-    '`log=$(mktemp); git commit -F <arquivo> -- <paths> > "$log" 2>&1; echo "saida=$?"; tail -40 "$log"`;\n' +
-    '- você NÃO altera código em hipótese alguma: se um gate do commit falhar, não corrija; devolva commitado=false, ' +
-    'gateFalhou=true e a saída relevante em motivo;\n' +
-    '- se o harness ou o classificador de permissões recusar uma ferramenta ou um comando, não tente de outro jeito ' +
-    '(outro comando, outra ferramenta, outro caminho): pare e devolva recusado=true, o texto da recusa em motivo e ' +
-    'commitado=false, ou commitado=true com o SHA se o commit já tinha sido feito. Recusa exige decisão humana;\n' +
-    '- devolva o SHA completo (`git rev-parse HEAD`).' + aviso + '\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO,
-    { label: `commit: ${f.titulo}`, phase: fase, schema: RESULTADO_COMMIT, effort: 'low' },
+// Commit só depois da revisão aprovada, e o worker nunca commita. O commit é um passo fixo da missão: o comando sai
+// pronto daqui, com os caminhos da lista que têm mudança, e o agente barato só o executa e devolve a saída literal.
+// Nunca `git add -A` nem `.`: o que não está na lista fica fora. Devolve { commit }, { apontamento } (commit falhou,
+// vira ajuste), { verificar, parar? } (a conferência a seguir decide) ou { erro }.
+const aspas = p => `'${String(p).replace(/'/g, `'\\''`)}'`
+// Mensagem: a que o worker escreveu no formato do projeto; sem ela, uma mínima a partir do título.
+function comandoDeCommit(f, caminhos, escrita) {
+  const mensagem = String(escrita ?? '').replace(/^MSG_MISSAO$/gm, '').trim() ||
+    `${f.etapa === 'corrigir' ? 'fix' : 'feat'}: ${f.titulo}`
+  const lista = caminhos.map(aspas).join(' ')
+  return 'log=$(mktemp); msg=$(mktemp); cat > "$msg" <<\'MSG_MISSAO\'\n' + mensagem + '\nMSG_MISSAO\n' +
+    `git add -- ${lista} > "$log" 2>&1 && git commit -F "$msg" -- ${lista} >> "$log" 2>&1; ` +
+    'echo "saida=$?"; tail -60 "$log"; echo "head=$(git rev-parse HEAD)"; rm -f "$msg" "$log"'
+}
+async function commitar(f, caminhos, fase, antes, mensagem) {
+  const comando = comandoDeCommit(f, caminhos, mensagem)
+  const chamar = () => agent(
+    `Commit da feature "${f.titulo}", já revisada e aprovada. Rode exatamente o comando abaixo, uma vez, no Bash, na raiz ` +
+    'do repositório, e devolva em saida a saída literal e completa. Não rode mais nada, não altere o comando e não ' +
+    'tente corrigir nada se ele falhar. Se o harness ou o classificador de permissões recusar o comando, não tente de ' +
+    'outro jeito: devolva recusado=true e o texto da recusa em motivo.\n\n' + comando,
+    { label: `commit: ${f.titulo}`, phase: fase, schema: RESULTADO_COMMIT, model: CONFIG.modeloConferencia, effort: 'low' },
   )
-  async function tentar(aviso = '') {
-    let r = await chamar(aviso)
-    for (let t = 1; !r && t <= MAX_RETENTATIVAS_INFRA; t++) {
-      const c = await lerGit(antes, fase)
-      if (!c) return { erro: 'agente de commit caiu e não foi possível ler o repositório' }
-      if (c.commits.length > 0) {
-        // A lista só cresce e pode ter caminho revertido; o commit adotado precisa estar contido nela.
-        const mesmos = c.arquivos.length > 0 && c.arquivos.every(a => naLista(arquivos, normalizar(a)))
-        if (c.branch === preparo.branch && c.commits.length === 1 && mesmos) return { commitado: true, commit: c.commits[0] }
-        return { erro: `agente de commit caiu deixando ${c.commits.length} commit(s) que não correspondem à feature ` +
-          `revisada (${c.commits.join(', ')}); pode haver commit de fora da missão` }
-      }
-      log(`commit: ${f.titulo}: agente não retornou (queda ou pulo manual), tentativa ${t + 1} de ${MAX_RETENTATIVAS_INFRA + 1}`)
-      r = await chamar(aviso)
-    }
-    return r ?? { erro: `agente de commit não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas` }
+  let r = await chamar()
+  for (let t = 1; !r && t <= MAX_RETENTATIVAS_INFRA; t++) {
+    const c = await lerGit(antes, fase)
+    if (!c) return { erro: 'agente de commit caiu e não foi possível ler o repositório' }
+    // Caiu com commit no intervalo (o dela ou de outra sessão): a conferência a seguir classifica os commits.
+    if (c.commits.length > 0) return { verificar: true, motivo: 'o agente de commit caiu' }
+    log(`commit: ${f.titulo}: agente não retornou (queda ou pulo manual), tentativa ${t + 1} de ${MAX_RETENTATIVAS_INFRA + 1}`)
+    r = await chamar()
   }
-  const r = await tentar()
-  if (r.erro) return { erro: r.erro }
-  const feito = r.commitado && r.commit ? r.commit : null
-  // Recusa contornada não se resolve com ajuste: a decisão é humana.
-  const parar = r.recusado ? `o harness recusou um comando do agente de commit, e a missão não contorna recusa: ${r.motivo ?? 'sem texto'}` : null
-  if (parar) return feito ? { commit: feito, parar } : { erro: `${parar}. Decida à mão, conferindo \`git status\` e \`git log\`` }
-  if (feito) return { commit: feito }
-  if (r.gateFalhou) return { apontamento: `gate do commit falhou: ${r.motivo ?? 'sem saída'}` }
-  // Sem commit e sem causa conhecida: um commit de fora da missão (ex.: `git commit -a`) pode ter levado o diff. Se
-  // os arquivos da feature estão nesses commits e nenhum ficou pendente na árvore, a feature foi entregue por ele.
-  const c = await lerGit(antes, fase)
-  if (c?.commits.length && c.branch === preparo.branch && levouODiff(c, arquivos)) return { levadoPorFora: c }
-  if (c?.commits.length) {
-    return { semDiff: !caminhosPendentes(c).some(a => naLista(arquivos, a)), erro: `o agente de commit não commitou (${r.motivo ?? 'sem motivo'}), e ${antes}..HEAD tem ` +
-      `commit de fora da missão: ${c.commits.join(', ')}, que pode ter levado o diff da feature. ${comoAceitar(c.head)}. ` +
-      `Se aceitar e o diff da feature foi junto, inclua também "${f.titulo}" em retomar.concluidas` }
-  }
-  return { erro: r.motivo ?? 'commit não realizado' }
+  if (!r) return { erro: `agente de commit não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas` }
+  // Recusa não se contorna: a decisão é humana. A conferência a seguir diz se o commit chegou a ser feito.
+  if (r.recusado) return { verificar: true, parar: `o harness recusou o comando de commit, e a missão não contorna recusa: ${r.motivo ?? 'sem texto'}` }
+  const texto = String(r.saida ?? '')
+  const codigo = /saida=(\d+)/.exec(texto)?.[1]
+  const sha = /head=([0-9a-f]{7,40})/i.exec(texto)?.[1] ?? null
+  if (codigo === '0' && sha) return { commit: sha }
+  // Commit que falhou com saída (gate do hook, por exemplo) vira ajuste, como antes; sem saída reconhecível, a
+  // conferência vê se o diff já foi commitado.
+  if (codigo && codigo !== '0') return { apontamento: `o commit falhou (gate ou hook): ${texto.slice(-2000)}` }
+  return { verificar: true, motivo: `saída do commit não reconhecida: ${texto.slice(0, 300)}` }
 }
 
 // Commits reais que a missão não fez, quando todos os dela estão lá: vieram de outra sessão ou automação.
@@ -670,12 +663,6 @@ function aceitarCommitsDeFora(c, deFora, milestone, emCurso = []) {
   deForaTocando.push({ milestone, commits: [...deFora], arquivos: tocados })
   log(`commit de fora aceito, toca a missão: ${deFora.join(', ')}. O commit de fora toca arquivo da missão: ${tocados.join(', ')}`)
 }
-// O diff da feature foi num commit de fora: algum arquivo dela está nos commits do intervalo e nenhum ficou pendente.
-function levouODiff(c, arquivos) {
-  const nosCommits = new Set(c.commits.flatMap(s => (c.arquivosPorCommit?.[s] ?? []).map(normalizar)))
-  const pendentes = (c.pendencias ?? []).map(l => /^\S{1,2}\s+"?(.+?)"?$/.exec(l.trim())?.[1]).filter(Boolean).map(normalizar)
-  return [...arquivos].some(a => nosCommits.has(a)) && !pendentes.some(a => naLista(arquivos, a))
-}
 // Arquivos da missão tocados por commit de fora, para quem revisa. milestone null: todos (caça final e suíte).
 function reviseDeFora(milestone = null) {
   const d = deForaTocando.filter(x => milestone === null || x.milestone === milestone)
@@ -687,41 +674,59 @@ function reviseDeFora(milestone = null) {
 // A missão não decide pelo usuário se fica um commit que ela não revisou: diz como aceitá-lo na retomada.
 const aceitar = headReal => 'ponha em retomar.commits a saída de `git rev-list --reverse <retomar.base>..HEAD` e em ' +
   `retomar.head o HEAD real, ${headReal}`
-// Commit de fora aceito à mão vai também em retomar.deFora: sem isso, a retomada o contaria como da missão.
-const aceitarDeFora = headReal => `${aceitar(headReal)}, e os SHAs de fora também em retomar.deFora, para não contarem como da missão`
-const comoAceitar = headReal => `Para aceitá-lo, ${aceitarDeFora(headReal)}; para recusá-lo, tire-o do histórico e ajuste retomar ao git resultante`
 
-// Logo depois do commit de cada feature: `antes..HEAD` tem de ser exatamente o commit declarado (mais commits de fora
-// aceitos), com arquivos da lista revisada. Sujeira na árvore, da linha de base ou de outras sessões, não conta. naoAdotar: o commit não entra no `retomar`, porque não está no git ou tem arquivo não
-// revisado; sem ajuste, a retomada recusa.
-async function conferirCommit(f, commit, antes, arquivos, fase) {
+// Logo depois do commit de cada feature, classifica os commits de `antes..HEAD` que ainda não foram aceitos como de fora:
+// - da feature: todos os arquivos na lista revisada (o commit do agente ou um que o próprio worker fez);
+// - de fora: nenhum arquivo na lista; aceito e registrado, nunca para a missão;
+// - misto: arquivo da feature junto de arquivo que a revisão não viu; fica fora do retomar e a missão para.
+// Sujeira na árvore, da linha de base ou de outras sessões, não conta. Devolve { daFeature, novos, head },
+// { semCommit, motivo } quando nada da feature foi commitado, ou { motivo, naoAdotar?, naoLido? }.
+async function fecharCommit(f, antes, arquivos, fase, declarado = null) {
   const c = await lerGit(antes, fase)
-  if (!c) return { motivo: `a conferência logo depois do commit de "${f.titulo}" não retornou; o commit declarado, ${commit}, entrou em retomar sem ser conferido${causaGit()}` }
+  if (!c) {
+    return { naoLido: true, motivo: `a conferência logo depois do commit de "${f.titulo}" não retornou` +
+      `${declarado ? `; o commit declarado, ${declarado}, entrou em retomar sem ser conferido` : ''}${causaGit()}` }
+  }
   if (c.branch !== preparo.branch) return { motivo: `branch mudou para "${c.branch}" logo depois do commit de "${f.titulo}"` }
-  if (!c.commits.some(s => mesmoSha(s, commit))) {
-    return { naoAdotar: true, motivo: `o agente de commit declarou ${commit}, mas ${antes}..HEAD tem ` +
+  if (declarado && !c.commits.some(s => mesmoSha(s, declarado))) {
+    return { naoAdotar: true, motivo: `o agente de commit declarou ${declarado}, mas ${antes}..HEAD tem ` +
       `${c.commits.join(', ') || 'nenhum commit'}; confira o git e ajuste retomar à mão` }
   }
-  const deFora = commitsDeFora(c, [commit])
-  if (deFora.length) aceitarCommitsDeFora(c, deFora, f.milestone, [...arquivos])
-  else if (!mesmoSha(c.head, commit)) return { motivo: `HEAD real ${c.head} difere do commit declarado ${commit}` }
-  // Com commit de fora aceito no intervalo, só os arquivos do commit da feature contam.
-  const doCommit = deFora.length ? c.arquivosPorCommit?.[c.commits.find(s => mesmoSha(s, commit))] ?? c.arquivos : c.arquivos
-  const alheios = doCommit.map(normalizar).filter(a => !naLista(arquivos, a))
-  if (alheios.length) {
-    return { naoAdotar: true, motivo: `o commit de "${f.titulo}", ${commit}, tem arquivos fora da lista revisada: ` +
+  const arquivosDe = s => (c.arquivosPorCommit?.[s] ?? []).map(normalizar)
+  const daFeature = []
+  const deFora = []
+  const mistos = []
+  for (const s of c.commits.filter(s => !deForaAceitos.some(d => mesmoSha(d, s)))) {
+    const todos = arquivosDe(s)
+    const naFeature = todos.filter(a => naLista(arquivos, a))
+    if (todos.length && naFeature.length === todos.length) daFeature.push(s)
+    else if (!naFeature.length) deFora.push(s)
+    else mistos.push(s)
+  }
+  if (mistos.length) {
+    const alheios = [...new Set(mistos.flatMap(arquivosDe).filter(a => !naLista(arquivos, a)))]
+    return { naoAdotar: true, motivo: `o commit de "${f.titulo}", ${mistos.join(', ')}, tem arquivos fora da lista revisada: ` +
       `${alheios.join(', ')}. Ele ficou fora do retomar. Para aceitá-lo, ${aceitar(c.head)}, e inclua "${f.titulo}" em ` +
       'retomar.concluidas; para recusá-lo, tire-o do histórico e retome sem mudar o retomar, e a feature se repete' }
   }
+  if (deFora.length) aceitarCommitsDeFora(c, deFora, f.milestone, [...arquivos])
+  // O que sobrou na árvore fora da lista da feature é sujeira alheia já vista.
+  for (const p of caminhosPendentes(c)) if (!naLista(arquivos, p)) sujeiraVista.add(p)
+  // Arquivo da lista ainda pendente depois do commit: o commit não levou tudo (ou só o worker commitou uma parte).
+  const faltando = caminhosPendentes(c).filter(a => naLista(arquivos, a))
+  if (!daFeature.length) return { semCommit: true, faltando, motivo: `nenhum commit com o diff da feature "${f.titulo}" em ${antes}..HEAD` }
   // Arquivo que já estava sujo antes da missão e que o worker editou foi inteiro no commit: aviso, não parada.
-  const jaSujos = doCommit.map(normalizar).filter(a => sujeiraInicial.includes(a))
+  const jaSujos = [...new Set(daFeature.flatMap(arquivosDe).filter(a => sujeiraInicial.includes(a)))]
   if (jaSujos.length) {
-    sujeiraCommitada.push({ feature: f.titulo, commit, arquivos: jaSujos })
+    sujeiraCommitada.push({ feature: f.titulo, commit: daFeature.at(-1), arquivos: jaSujos })
     // Já commitado, o arquivo deixa de ser sujeira de antes: os próximos commits dele não repetem o aviso.
     for (const a of jaSujos) sujeiraInicial.splice(sujeiraInicial.indexOf(a), 1)
     log(`aviso: "${f.titulo}" commitou inteiro arquivo que já tinha mudança antes da missão: ${jaSujos.join(', ')}`)
   }
-  return { novos: c.commits, head: c.head }
+  if (daFeature.length > 1 || (declarado && !mesmoSha(daFeature.at(-1), declarado))) {
+    log(`"${f.titulo}": commits com o diff da feature além do agente de commit: ${daFeature.join(', ')}; todos com arquivos da lista revisada`)
+  }
+  return { daFeature, faltando, novos: c.commits, head: c.head }
 }
 
 // Em série, como na Mission: cada feature parte do commit da anterior.
@@ -733,38 +738,39 @@ async function implementar(features, fase) {
   const commits = []
   for (const f of features) {
     const antes = head
-    const falhou = motivo => ({ falhou: { feature: f.titulo, motivo }, resultados, commits })
+    let arquivos = new Set()
+    const falhou = motivo => ({ falhou: { feature: f.titulo, motivo, arquivosPendentes: [...arquivos] }, resultados, commits })
     const sujo = ' O diff da feature ficou sem commit: descarte-o para a retomada repetir a feature, ou commite à mão ' +
       'e ajuste retomar.head, retomar.commits e retomar.concluidas.'
-    // Worker que caiu: repete se não houve commit nem troca de branch. Se deixou diff parcial, o próximo continua dele.
+    // Worker que caiu: repete, mesmo com commit novo no intervalo (de outra sessão, ou dele: a conferência depois do
+    // commit os classifica). Só para se a branch mudou ou o histórico foi reescrito. Diff parcial: o próximo continua.
     let parcial = false
     const r = await comRetentativa(f.titulo, () => trabalhar(promptTrabalho(f, parcial
-      ? '\nUma tentativa anterior caiu no meio: as mudanças não commitadas que não estavam na árvore antes da missão ' +
-        `(${sujeiraInicial.join(', ') || 'nenhuma'}) são trabalho parcial desta feature. Continue a partir delas e ` +
+      ? '\nUma tentativa anterior caiu no meio: as mudanças não commitadas que não estavam na árvore antes dela ' +
+        `(${[...sujeiraVista].join(', ') || 'nenhuma'}) são trabalho parcial desta feature. Continue a partir delas e ` +
         'declare em `arquivos` também os caminhos que ela já tinha alterado (veja `git status`).'
       : ''),
       { label: f.titulo, phase: fase, schema: RESULTADO_FEATURE },
     ), async () => {
       const c = await lerGit(antes, fase)
       if (!c) return { ok: false, semLeitura: true }
-      if (c.branch !== preparo.branch || !mesmoSha(c.head, antes) || c.commits.length > 0) {
-        return { ok: false, head: c.head, motivo: `branch ${c.branch}, HEAD ${c.head}, ${c.commits.length} commit(s) novo(s)` +
-          (c.commits.length ? `: ${c.commits.join(', ')}` : '') }
-      }
-      if (caminhosPendentes(c).some(a => !sujeiraInicial.includes(a))) parcial = true
+      if (c.branch !== preparo.branch) return { ok: false, motivo: `branch mudou para ${c.branch}` }
+      if (!c.commits.length && !mesmoSha(c.head, antes)) return { ok: false, motivo: `HEAD ${c.head} não descende de ${antes}` }
+      if (c.commits.length) log(`${f.titulo}: agente caiu com commit(s) novo(s) no intervalo (${c.commits.join(', ')}); repetindo, e a conferência depois do commit os classifica`)
+      if (caminhosPendentes(c).some(a => !sujeiraVista.has(a))) parcial = true
       return { ok: true }
     })
     if (r?.semRetentativa) {
       const e = r.semRetentativa
       return falhou(e.semLeitura
         ? 'agente caiu e não foi possível ler o repositório para decidir se era seguro repetir'
-        : `agente caiu e o histórico mudou (${e.motivo}), por commit dele ou de fora da missão. Desfaça isso para ` +
-          `repetir a feature. Se for commit de fora e quiser aceitá-lo, ${aceitarDeFora(e.head)}, descartando o diff parcial ` +
-          'da feature, se houver')
+        : `agente caiu e o histórico mudou (${e.motivo}). Confira o git e ajuste retomar à mão`)
     }
     if (!r) return falhou(`agente não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas.${sujo}`)
     if (!r.concluida) return falhou(r.resumo + sujo)
-    const arquivos = new Set((r.arquivos ?? []).map(normalizar))
+    arquivos = new Set((r.arquivos ?? []).map(normalizar))
+    let mensagem = r.mensagem
+    for (const a of (r.naoSao ?? []).map(normalizar)) sujeiraVista.add(a)
     if (arquivos.size === 0) {
       // Só correção pode sair sem mudança; feature original precisa entregar algo.
       if (r.jaResolvido && fase === 'Corrigir') {
@@ -776,17 +782,18 @@ async function implementar(features, fase) {
 
     let anteriores = []
     let rodada = 0
-    let commit = null
+    let pos = null
+    let declarado = null
     let pararDepois = null
-    let levado = null
-    while (!commit) {
+    while (!pos) {
       const memoria = anteriores.length
         ? `\nNa rodada anterior foram apontados: ${anteriores.join(' | ')}. Confirme se foram resolvidos.`
         : ''
       const rev = await comRetentativa(`revisão: ${f.titulo}`, () => trabalhar(montar('revisar',
         `Revisão independente, antes do commit, da feature "${f.titulo}". Spec: ${f.spec}\n` +
-        `O diff desta feature são os arquivos ${[...arquivos].join(', ')}: veja \`git diff HEAD -- <esses caminhos>\` ` +
-        '(inclui o que estiver em stage) e os novos entre eles. Outras mudanças na árvore não são desta feature: ignore-as. ' +
+        `O diff desta feature são os arquivos ${[...arquivos].join(', ')}: veja \`git diff ${antes} -- <esses caminhos>\` ` +
+        '(inclui stage e o que já tiver sido commitado desde o início da feature) e os novos entre eles. Outras ' +
+        'mudanças na árvore não são desta feature: ignore-as. ' +
         'Aponte só problemas bloqueantes de correção, segurança, contrato ou testes faltantes.' +
         (blocoDesign(f.milestone)
           ? `${blocoDesign(f.milestone)}\nConfira a aderência ao desenho e ao checklist de UX só das telas e fluxos que ESTA ` +
@@ -799,17 +806,47 @@ async function implementar(features, fase) {
         { label: `revisão: ${f.titulo}`, phase: fase, agentType: revisorPara([...arquivos]), schema: VALIDACAO },
       ))
       if (!rev) return falhou('revisor da feature não respondeu.' + sujo)
-      let problemas
+      let problemas = null
       if (rev.aprovado) {
-        const c = await commitar(f, arquivos, fase, antes)
-        if (c.levadoPorFora) { levado = c.levadoPorFora; break }
-        if (c.commit) { commit = c.commit; pararDepois = c.parar; break }
-        if (c.erro) return falhou(c.semDiff ? c.erro : c.erro + '.' + sujo)
-        problemas = [c.apontamento]
+        // Antes do commit: mudança nova na árvore que o worker não declarou (não estava na linha de base nem era sujeira
+        // alheia já vista) volta para ele declarar ou desfazer, porque o commit só leva a lista.
+        const c0 = await lerGit(antes, fase)
+        if (!c0) return falhou(`não foi possível ler o repositório antes do commit${causaGit()}.${sujo}`)
+        if (c0.branch !== preparo.branch) return falhou(`branch mudou para "${c0.branch}" antes do commit de "${f.titulo}"`)
+        const naoDeclarados = caminhosPendentes(c0).filter(a => !sujeiraVista.has(a) && !naLista(arquivos, a))
+        if (naoDeclarados.length) {
+          problemas = [`mudanças novas na árvore fora da lista da feature: ${naoDeclarados.join(', ')}. Se forem desta ` +
+            'feature (inclusive a origem de uma renomeação), declare-as em arquivos; se forem suas e não da feature, ' +
+            'desfaça só elas; se não foram você que fez, não mexa e liste-as em naoSao']
+        } else {
+          // Só os caminhos da lista que têm mudança: o que o worker já commitou sozinho a conferência classifica.
+          const caminhos = caminhosPendentes(c0).filter(a => naLista(arquivos, a))
+          let cm = caminhos.length ? await commitar(f, caminhos, fase, antes, mensagem) : { verificar: true, motivo: 'nenhum arquivo da lista com mudança pendente' }
+          if (cm.erro) return falhou(cm.erro + '.' + sujo)
+          if (cm.apontamento) problemas = [cm.apontamento]
+          else {
+            declarado = cm.commit ?? null
+            pararDepois = cm.parar ?? null
+            pos = await fecharCommit(f, antes, arquivos, fase, declarado)
+            // Commit de fora aceito, agente que não commitou ou commit parcial (do próprio worker), com arquivo da lista
+            // ainda sem commit: commita o que falta, uma vez.
+            if (!pararDepois && (pos.semCommit || !pos.motivo) && pos.faltando?.length) {
+              log(`${f.titulo}: arquivos da lista ainda sem commit (${pos.faltando.join(', ')}); repetindo o commit`)
+              cm = await commitar(f, pos.faltando, fase, antes, mensagem)
+              if (cm.erro || cm.apontamento) return falhou(`${cm.erro ?? cm.apontamento}.${sujo}`)
+              declarado = cm.commit ?? declarado
+              pararDepois = cm.parar ?? null
+              pos = await fecharCommit(f, antes, arquivos, fase, cm.commit ?? null)
+            }
+            if (pos.semCommit) return falhou(`${pararDepois ?? `o diff da feature não foi commitado (${cm.motivo ?? pos.motivo})`}.${sujo}`)
+            if (!pos.motivo && pos.faltando?.length) return falhou(`o commit não levou todos os arquivos da lista: ${pos.faltando.join(', ')}.${sujo}`)
+          }
+        }
       } else {
         if (rev.problemas.length === 0) return falhou('revisão da feature reprovou sem apontar problemas.' + sujo)
         problemas = rev.problemas.map(p => `${p.arquivo ?? ''} ${p.problema}`.trim())
       }
+      if (pos) break
       rodada++
       if (rodada > MAX_RODADAS_REVISAO) {
         return falhou(`revisão da feature não fechou após ${MAX_RODADAS_REVISAO} rodadas de ajuste: ${problemas.join(' | ')}.${sujo}`)
@@ -825,30 +862,24 @@ async function implementar(features, fase) {
       if (!ajuste) return falhou(`agente de ajuste não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas.${sujo}`)
       if (!ajuste.concluida) return falhou(ajuste.resumo + sujo)
       for (const a of (ajuste.arquivos ?? []).map(normalizar)) arquivos.add(a)
+      for (const a of (ajuste.naoSao ?? []).map(normalizar)) sujeiraVista.add(a)
+      if (ajuste.mensagem) mensagem = ajuste.mensagem
       anteriores = problemas
     }
 
-    if (levado) {
-      // Outra sessão commitou o diff da feature: ela está entregue, e os commits de fora entram como esperados.
-      log(`commit de fora levou o diff da feature "${f.titulo}": ${levado.commits.join(', ')}; feature contada como concluída`)
-      aceitarCommitsDeFora(levado, levado.commits, f.milestone, [...arquivos])
-      head = levado.head
-      commits.push(...levado.commits)
+    // Conferência que não voltou: o commit declarado entra no retomar, sem ser conferido, como antes.
+    const adotados = pos.daFeature ? pos.novos : pos.naoLido && declarado ? [declarado] : null
+    if (adotados) {
+      head = pos.head ?? declarado
+      commits.push(...adotados)
       for (const a of arquivos) { arquivosDaMissao.add(a); arquivosDoMilestone.add(a) }
-      resultados.push({ feature: f.titulo, ...r, levadoPorFora: levado.commits, rodadasRevisao: rodada })
-      continue
-    }
-    // Commit de outra sessão no meio da missão é aceito aqui, antes da próxima feature, e não só no fim do milestone.
-    const pos = await conferirCommit(f, commit, antes, arquivos, fase)
-    if (!pos.naoAdotar) {
-      // Conferido, o intervalo pode trazer também commits de fora aceitos, na ordem real.
-      head = pos.head ?? commit
-      commits.push(...(pos.novos ?? [commit]))
-      for (const a of arquivos) { arquivosDaMissao.add(a); arquivosDoMilestone.add(a) }
-      resultados.push({ feature: f.titulo, ...r, commit, rodadasRevisao: rodada })
+      const commit = pos.daFeature?.at(-1) ?? declarado
+      resultados.push({ feature: f.titulo, ...r, commit, ...(pos.daFeature?.length > 1 ? { commitsDaFeature: pos.daFeature } : {}), rodadasRevisao: rodada })
+      // Commitado, o diff da feature já não é pendência dela na retomada.
+      arquivos = new Set()
     }
     if (pos.motivo) return falhou(pararDepois ? `${pararDepois}. ${pos.motivo}` : pos.motivo)
-    if (pararDepois) return falhou(`${pararDepois}. O commit da feature, ${commit}, já entrou em retomar: decida à mão antes de retomar`)
+    if (pararDepois) return falhou(`${pararDepois}. O commit da feature, ${pos.daFeature?.at(-1) ?? declarado}, já entrou em retomar: decida à mão antes de retomar`)
   }
   return { resultados, commits }
 }
@@ -909,6 +940,7 @@ async function conferir(base, esperados, milestone, fase = 'Scrutiny') {
     esperados.splice(0, esperados.length, ...c.commits)
     head = c.head
   }
+  for (const p of caminhosPendentes(c)) sujeiraVista.add(p)
   if (!mesmoSha(c.head, head)) return { ok: false, motivo: `HEAD real ${c.head} difere do declarado ${head}` }
   const bate = c.commits.length === esperados.length && c.commits.every((s, i) => mesmoSha(s, esperados[i]))
   if (!bate) return { ok: false, motivo: `commits do intervalo não batem com os declarados (real: ${c.commits.length}, declarados: ${esperados.length}); pode haver commit extra ou de outra sessão` }
@@ -1230,7 +1262,7 @@ function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   return {
     parouEm: m.titulo, ...extra, deForaTocando: [...deForaTocando], sujeiraCommitada: [...sujeiraCommitada], plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
     sugestaoAprendizados: sugestaoAprendizados(),
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs }, sujeiraInicial: [...sujeiraInicial], sujeiraCommitada: [...sujeiraCommitada] },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs }, sujeiraInicial: [...sujeiraInicial], sujeiraCommitada: [...sujeiraCommitada], arquivosPendentes: extra.arquivosPendentes ?? [] },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1250,9 +1282,12 @@ for (const [i, m] of pendentes.entries()) {
     const esperado = retomar.commits
     const desde = !c ? -1 : mesmoSha(base, INICIO_MISSAO) ? 0 : c.commits.findIndex(s => mesmoSha(s, base)) + 1
     const doMilestone = c && (desde > 0 || mesmoSha(base, INICIO_MISSAO)) ? c.commits.slice(desde) : null
-    const intacto = c && doMilestone && c.branch === preparo.branch && (!retomar.branch || c.branch === retomar.branch) && mesmoSha(c.head, retomar.head) && mesmoSha(c.head, head) &&
-      doMilestone.length === esperado.length && doMilestone.every((s, j) => mesmoSha(s, esperado[j])) &&
-      (esperado.length > 0 || mesmoSha(base, head))
+    // Commits depois do HEAD da parada são de fora: aceitos, como em qualquer ponto da missão.
+    const extras = doMilestone && doMilestone.length > esperado.length ? doMilestone.slice(esperado.length) : []
+    const intacto = c && doMilestone && c.branch === preparo.branch && (!retomar.branch || c.branch === retomar.branch) &&
+      mesmoSha(c.head, head) && (extras.length ? mesmoSha(doMilestone[esperado.length - 1] ?? base, retomar.head) : mesmoSha(c.head, retomar.head)) &&
+      doMilestone.length >= esperado.length && esperado.every((s, j) => mesmoSha(doMilestone[j], s)) &&
+      (esperado.length > 0 || extras.length > 0 || mesmoSha(base, head))
     if (!intacto) {
       // Devolve o `retomar` recebido, intacto, para o usuário ajustar e tentar de novo.
       return { ...parar(m, base, feitas, [], {
@@ -1263,9 +1298,18 @@ for (const [i, m] of pendentes.entries()) {
           : `não foi possível ler o repositório para retomar${causaGit()}`,
       }, jaConcluidas), retomar }
     }
-    // Arquivos que a missão já commitou, sem os dos commits de fora aceitos: commit de fora que tocar um deles para.
-    for (const a of c.arquivos.map(normalizar)) arquivosDaMissao.add(a)
-    for (const a of c.arquivosDoMilestone.map(normalizar)) arquivosDoMilestone.add(a)
+    let cm = c
+    if (extras.length) {
+      // Os arquivos da missão saem de uma nova leitura, já sem os extras; eles entram como de fora e nos esperados.
+      const cx = await lerGit(retomar.head, 'Preparar')
+      cm = await lerGit(INICIO_MISSAO, 'Preparar', 'conferência', [' --resumo', base, ...deForaAceitos, ...extras].join(' '))
+      if (!cx || !cm) return { ...parar(m, base, feitas, [], { motivo: `não foi possível ler o repositório para retomar${causaGit()}` }, jaConcluidas), retomar }
+      aceitarCommitsDeFora(cx, extras, m.titulo)
+      commits.push(...extras)
+    }
+    // Arquivos que a missão já commitou, sem os dos commits de fora aceitos: base para marcar commit de fora que os toca.
+    for (const a of cm.arquivos.map(normalizar)) arquivosDaMissao.add(a)
+    for (const a of cm.arquivosDoMilestone.map(normalizar)) arquivosDoMilestone.add(a)
     log(`Retomando "${m.titulo}" sobre ${base}: ${esperado.length} commits anteriores, ${jaConcluidas.length} itens ` +
       `concluídos, ${arquivosDaMissao.size} arquivos já tocados pela missão; orçamento de correções recomeça em ${MAX_RODADAS_CORRECAO} rodadas`)
   }
