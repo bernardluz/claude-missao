@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { executar, carregar, plano, DUMP, MEDICAO_ANTES, MEDICAO_DEPOIS } from './simulador.mjs'
+import { executar, carregar, plano, MEDICAO_ANTES, MEDICAO_DEPOIS } from './simulador.mjs'
 import { readFileSync } from 'node:fs'
 import { NUCLEO, gerar, lerEtapas } from '../instalar.mjs'
 
@@ -51,12 +51,6 @@ describe('fluxo principal', () => {
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.contar('F2 · ajuste'), 1)
     assert.match(r.prompt('F2 · ajuste 1'), /gate do commit falhou/)
-  })
-
-  test('mudança fora da lista vira ajuste em vez de parar', async () => {
-    const r = await rodar(plano(), { foraDaLista: { F1: 1 } })
-    assert.equal(r.resultado.concluido, true)
-    assert.match(r.prompt('F1 · ajuste 1'), /fora da lista/)
   })
 
   test('worker sem arquivos declarados para logo', async () => {
@@ -175,12 +169,6 @@ describe('conferência logo depois do commit', () => {
     assert.equal(adotado.contar('commit: F1'), 1)
   })
 
-  test('árvore suja logo depois do commit para a missão, com as pendências no motivo', async () => {
-    const r = await rodar(plano(), { suja: { 'commit: F1': 1 } })
-    assert.match(r.resultado.motivo, /árvore com mudanças não commitadas depois do commit de "F1": M x\/a\.js/)
-    assert.equal(r.contar('F2'), 0)
-  })
-
   test('conferência lê o git pelo script, com modelo barato, e saída inválida repete a leitura', async () => {
     const r = await rodar(plano(), { conferenciaInvalida: 1 })
     assert.equal(r.resultado.concluido, true)
@@ -207,12 +195,6 @@ describe('conferência logo depois do commit', () => {
     assert.match(outraBranch.resultado.motivo, /branch mudou para "outra" logo depois do commit de "F1"/)
   })
 
-  test('dump logo depois do commit é tolerado na conferência e apagado no commit seguinte', async () => {
-    const r = await rodar(plano(), { dump: { 'commit: F1': 1 } })
-    assert.equal(r.resultado.concluido, true)
-    const i = r.logs.indexOf(`dump de crash do bash na raiz, tolerado como artefato do ambiente: ${DUMP}`)
-    assert.ok(i >= 0 && i < r.logs.indexOf(`F2: agente de commit apagou dump de crash do bash: ${DUMP}`))
-  })
 })
 
 describe('agente de commit', () => {
@@ -251,99 +233,6 @@ describe('agente de commit', () => {
       assert.match(r.prompt(label), /Nunca leia a saída por pipe \(`\| tail`, `\| head`, `\| tee`\): um daemon/, label)
     }
     assert.match(r.prompt('commit: F1'), /git commit -F <arquivo> -- <paths> > "\$log" 2>&1; echo "saida=\$\?"; tail -40 "\$log"/)
-  })
-})
-
-describe('dump de crash do bash', () => {
-  test('agente de commit apaga o dump e a missão registra no log, sem ajuste', async () => {
-    const r = await rodar(plano(), { dump: { F1: 1 } })
-    assert.equal(r.resultado.concluido, true)
-    assert.equal(r.contar('F1 · ajuste'), 0)
-    assert.ok(r.logs.includes(`F1: agente de commit apagou dump de crash do bash: ${DUMP}`))
-    assert.deepEqual(r.estado.dumps, [])
-    assert.match(r.prompt('commit: F1'), /`\*\.stackdump` não rastreado na raiz .* apague-o, informe o caminho em descartados/)
-  })
-
-  test('dump listado como fora da lista não vira apontamento: o commit é repetido', async () => {
-    const r = await rodar(plano(), { dump: { F1: 1 }, ignoraDump: { F1: 1 } })
-    assert.equal(r.resultado.concluido, true)
-    assert.equal(r.contar('F1 · ajuste'), 0)
-    assert.equal(r.contar('revisão: F1'), 1)
-    const tentativas = r.chamadas.filter(c => c.label === 'commit: F1')
-    assert.equal(tentativas.length, 2)
-    assert.match(tentativas[1].prompt, /listou bash\.exe\.stackdump como fora da lista: é dump de crash do bash/)
-  })
-
-  test('agente que insiste em listar o dump para a missão sem ajuste', async () => {
-    const r = await rodar(plano(), { dump: { F1: 1 }, ignoraDump: { F1: 2 } })
-    assert.match(r.resultado.motivo, /não apagou o dump de crash do bash \(bash\.exe\.stackdump\)/)
-    assert.equal(r.contar('F1 · ajuste'), 0)
-  })
-
-  test('dump junto de mudança alheia: só a mudança alheia vira apontamento', async () => {
-    const r = await rodar(plano(), { dump: { F1: 1 }, ignoraDump: { F1: 1 }, foraDaLista: { F1: 1 } })
-    assert.equal(r.resultado.concluido, true)
-    const ajuste = r.prompt('F1 · ajuste 1')
-    assert.match(ajuste, /fora da lista da feature: y\/b\.js\./)
-    assert.doesNotMatch(ajuste, /stackdump/)
-  })
-
-  test('dump que sobra no fim do milestone é tolerado na conferência e apagado no commit seguinte', async () => {
-    const r = await rodar(plano(), { dump: { 'commit: F2': 1 } })
-    assert.equal(r.resultado.concluido, true)
-    const i = r.logs.indexOf(`dump de crash do bash na raiz, tolerado como artefato do ambiente: ${DUMP}`)
-    assert.ok(i >= 0 && i < r.logs.indexOf(`F3: agente de commit apagou dump de crash do bash: ${DUMP}`))
-  })
-
-  test('dump junto de mudança real ou fora da raiz não é tolerado', async () => {
-    const junto = await rodar(plano(), { dump: { 'commit: F2': 1 }, suja: { 'commit: F2': 1 } })
-    assert.match(junto.resultado.motivo, /árvore com mudanças não commitadas.*: M x\/a\.js, \?\? bash\.exe\.stackdump$/)
-    const naPasta = await rodar(plano(), { dump: { 'commit: F2': 1 }, caminhoDump: 'x/bash.exe.stackdump' })
-    assert.match(naPasta.resultado.motivo, /árvore com mudanças não commitadas.*: \?\? x\/bash\.exe\.stackdump$/)
-  })
-
-  test('dump na raiz não impede começar a missão', async () => {
-    const r = await rodar(plano(), {}, { git: ['base0000'], sujo: false, dumps: [DUMP] })
-    assert.equal(r.resultado.concluido, true)
-    assert.deepEqual(r.estado.dumps, [])
-  })
-
-  test('dump tolerado na adoção do commit e na retentativa do worker', async () => {
-    const adotado = await rodar(plano(), {
-      quedas: { 'commit: F1': 1 }, efeitoDaQueda: { 'commit: F1': 'commita' }, dump: { 'commit: F1': 1 },
-    })
-    assert.equal(adotado.resultado.concluido, true)
-    assert.equal(adotado.contar('commit: F1'), 1)
-    const worker = await rodar(plano(), { quedas: { F2: 1 }, dump: { F2: 1 } })
-    assert.equal(worker.resultado.concluido, true)
-    assert.doesNotMatch(worker.chamadas.filter(c => c.label === 'F2')[1].prompt, /trabalho parcial/)
-  })
-
-  test('dump declarado pelo worker ou pelo ajuste sai da lista da feature, e a revisão o ignora', async () => {
-    const r = await rodar(plano(), { arquivos: ['x/a.js', DUMP], arquivosGit: ['x/a.js'] })
-    assert.equal(r.resultado.concluido, true)
-    assert.match(r.prompt('commit: F1'), /Arquivos da feature: x\/a\.js\.\n/)
-    assert.match(r.prompt('revisão: F1'), /`\*\.stackdump` não rastreado na raiz .*: ignore-o\./)
-    const ajuste = await rodar(plano(), { revisaoFeature: { F1: [1, 0] }, arquivosAjuste: ['x/a.js', DUMP], arquivosGit: ['x/a.js'] })
-    assert.equal(ajuste.resultado.concluido, true)
-    assert.match(ajuste.prompt('commit: F1'), /Arquivos da feature: x\/a\.js\.\n/)
-  })
-
-  test('agente de commit que apaga além do dump para a missão', async () => {
-    const r = await rodar(plano(), { dump: { F1: 1 }, apagaAlem: { F1: ['hs_err_pid1.log'] } })
-    assert.match(r.resultado.motivo, /apagou o que não é dump de crash do bash: hs_err_pid1\.log\. O commit da feature, sha00001, já entrou em retomar/)
-    assert.ok(r.logs.includes(`F1: agente de commit apagou dump de crash do bash: ${DUMP}`))
-    assert.deepEqual(r.resultado.retomar.concluidas, ['F1'])
-    // Apagado a mais na tentativa que listou o dump não se perde na repetição do commit.
-    const naRepeticao = await rodar(plano(), { dump: { F1: 1 }, ignoraDump: { F1: 1 }, apagaAlem: { F1: ['notas.txt'] } })
-    assert.match(naRepeticao.resultado.motivo, /apagou o que não é dump de crash do bash: notas\.txt\. Decida à mão/)
-    assert.equal(naRepeticao.contar('commit: F1'), 1)
-  })
-
-  test('arquivo temporário fora do repositório não conta como apagado a mais', async () => {
-    const temporarios = ['/tmp/tmp.Ab12Cd', 'C:\\Users\\x\\AppData\\Local\\Temp\\msg.txt', '/c/Users/x/AppData/Local/Temp/log.txt']
-    const r = await rodar(plano(), { dump: { F1: 1 }, apagaAlem: { F1: temporarios } })
-    assert.equal(r.resultado.concluido, true)
   })
 })
 
@@ -1317,5 +1206,65 @@ describe('UI/UX por milestone', () => {
     assert.match(r.prompt('design: M1'), /Modo enxugar \(código existente\):\nModo enxugar: desenhe só as telas que mudam/)
     const normal = await rodarCom({}, { spec: 's.md' }, { ui: { M1: 'tela de contas' } })
     assert.doesNotMatch(normal.prompt('design: M1'), /Modo enxugar/)
+  })
+})
+
+describe('árvore suja não para a missão', () => {
+  const comSujeira = () => ({ git: ['base0000'], sujo: false, alheios: [' M notas.txt', '?? rascunho/ideia.md'] })
+
+  test('sujeira de antes da missão não para, vira linha de base e não entra em nenhum commit', async () => {
+    const estado = comSujeira()
+    const r = await rodar(plano(), {}, estado)
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.commits, 3)
+    assert.deepEqual(estado.alheios, [' M notas.txt', '?? rascunho/ideia.md'])
+    assert.ok(r.logs.some(l => /árvore com 2 mudança\(s\) não commitada\(s\) de antes: ficam fora dos commits \(notas\.txt, rascunho\/ideia\.md\)/.test(l)))
+    assert.deepEqual(r.resultado.sujeiraCommitada, [])
+  })
+
+  test('agente de commit recebe só a lista do worker e a ordem de não tocar no resto', async () => {
+    const r = await rodar(plano(), { arquivos: ['x/a.js', 'x/b.js'] }, comSujeira())
+    const p = r.prompt('commit: F1')
+    assert.match(p, /Arquivos da feature: x\/a\.js, x\/b\.js\./)
+    assert.match(p, /`git add -- <paths>` e `git commit -F <arquivo> -- <paths>`, nunca `git add -A` nem `git add \.`/)
+    assert.match(p, /outras mudanças \(de antes da missão ou de outras sessões\): não são desta feature; não as inclua, não as desfaça, não as apague/)
+    assert.doesNotMatch(p, /notas\.txt/)
+    assert.match(r.prompt('revisão: F1'), /O diff desta feature são os arquivos x\/a\.js, x\/b\.js.*Outras mudanças na árvore não são desta feature: ignore-as/)
+  })
+
+  test('arquivo sujo antes e editado pelo worker vai inteiro no commit e vira aviso, sem parar', async () => {
+    const estado = { git: ['base0000'], sujo: false, alheios: [' M x/a.js', ' M notas.txt'] }
+    const r = await rodar(plano(), {}, estado)
+    assert.equal(r.resultado.concluido, true)
+    assert.deepEqual(r.resultado.sujeiraCommitada, [{ feature: 'F1', commit: 'sha00001', arquivos: ['x/a.js'] }])
+    assert.ok(r.logs.some(l => /^aviso: "F1" commitou inteiro arquivo que já tinha mudança antes da missão: x\/a\.js$/.test(l)))
+    assert.deepEqual(estado.alheios, [' M notas.txt'])
+  })
+
+  test('sujeira alheia surgindo no meio da missão não para nem vira arquivo fora da lista', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const r = await rodar(plano(), { suja: { 'commit: F1': 'outra/sessao.js', 'testes: M1': 'outra/depois.js', F3: 'outra/durante.js' } }, estado)
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.commits, 3)
+    assert.equal(r.contar('F1 · ajuste') + r.contar('F2 · ajuste') + r.contar('F3 · ajuste'), 0)
+    assert.deepEqual(estado.alheios.sort(), [' M outra/depois.js', ' M outra/durante.js', ' M outra/sessao.js'])
+  })
+
+  test('linha de base vai no retomar e soma a sujeira da retomada', async () => {
+    const estado = comSujeira()
+    const p1 = await rodar(plano(), { validacao: [2, 2] }, estado)
+    assert.deepEqual(p1.resultado.retomar.sujeiraInicial, ['notas.txt', 'rascunho/ideia.md'])
+    estado.alheios.push(' M nova.txt')
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.ok(p2.logs.some(l => /árvore com 3 mudança\(s\) não commitada\(s\) de antes/.test(l)))
+  })
+
+  test('worker que cai com sujeira de antes na árvore não confunde a sujeira com trabalho parcial', async () => {
+    const r = await rodar(plano(), { quedas: { F2: 1 } }, comSujeira())
+    assert.equal(r.resultado.concluido, true)
+    assert.doesNotMatch(r.chamadas.filter(c => c.label === 'F2')[1].prompt, /caiu no meio/)
+    const parcial = await rodar(plano(), { quedas: { F2: 1 }, efeitoDaQueda: { F2: 'suja' } }, comSujeira())
+    assert.match(parcial.chamadas.filter(c => c.label === 'F2')[1].prompt, /não estavam na árvore antes da missão \(notas\.txt, rascunho\/ideia\.md\) são trabalho parcial/)
   })
 })

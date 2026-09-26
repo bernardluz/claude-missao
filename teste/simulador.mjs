@@ -20,7 +20,6 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   suite              [n falhas por rodada da suíte completa final]
 //   suiteAmbiente      a suíte falha por ambiente
 //   gate               { [feature]: vezes que o gate falha }
-//   foraDaLista        { [feature]: vezes que o commit acusa mudança fora da lista }
 //   quedas             { [label]: vezes que o agente devolve null }
 //   efeitoDaQueda      { [label]: 'commita' | 'suja' | 'commitaOrfao' }
 //   semArquivos        worker não declara arquivos
@@ -28,15 +27,11 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   branchNaConferencia branch devolvida pela conferência (simula troca de branch)
 //   commitDeFora       { [label]: sha } outra sessão commita os próprios arquivos logo depois desse agente
 //   commitDeForaTudo   { [label]: sha } outra sessão faz `git commit -a` logo depois desse agente e leva o diff
-//   suja               { [label]: vezes } outra sessão deixa mudança não commitada depois desse agente
+//   suja               { [label]: caminho } outra sessão deixa mudança não commitada nesse caminho depois desse agente
 //   recusa             { [feature]: { motivo, commita?, ...campos } } o harness recusa um comando do agente de
 //                      commit; com commita, a recusa vem depois do commit
 //   shaErrado          { [feature]: sha } o agente de commit commita, mas declara outro SHA
 //   falhaCommit        { [feature]: motivo } o commit falha uma vez por causa que não é gate nem lista
-//   dump               { [label]: vezes } o bash desse agente cai, mesmo que ele caia junto, e deixa um dump
-//   caminhoDump        onde o dump aparece (padrão bash.exe.stackdump, na raiz)
-//   ignoraDump         { [feature]: vezes } o agente de commit lista o dump como fora da lista em vez de apagá-lo
-//   apagaAlem          { [feature]: [caminhos] } o agente de commit apaga e informa também o que não é dump
 //   arquivosDeFora     arquivos dos commits que não são da missão (padrão ['z/fora.js'])
 //   areas              áreas que o agente do contexto do plano devolve
 //   aprendizados       { [label]: [textos] } aprendizados que esse agente devolve
@@ -59,22 +54,19 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   conferenciaSemPorCommit vezes que a conferência omite arquivosPorCommit
 //   conferenciaComCerca o agente de conferência devolve o JSON dentro de cerca de código
 //   conferenciaInvalida vezes que o agente de conferência devolve texto em vez da saída do git-estado.mjs
-export const DUMP = 'bash.exe.stackdump'
 export const MEDICAO_ANTES = { linhas: 23000, tabelas: 34, filas: 6, arquivos: 410, testes: 120, comandos: 'git ls-files | wc -l' }
 export const MEDICAO_DEPOIS = { linhas: 3800, tabelas: 6, filas: 0, arquivos: 60, testes: 40, comandos: 'git ls-files | wc -l' }
+// estado.git: commits; estado.sujo: diff do worker (nos arquivos que o git lista); estado.alheios: linhas do
+// `git status --porcelain` que não são da missão (de antes dela ou de outras sessões).
 export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0000'], sujo: false }) {
   const o = opcoes
-  estado.dumps ??= []
+  estado.alheios ??= []
   const quedas = { ...(o.quedas ?? {}) }
   const revisaoFeature = Object.fromEntries(Object.entries(o.revisaoFeature ?? {}).map(([k, v]) => [k, [...v]]))
   const gate = { ...(o.gate ?? {}) }
-  const fora = { ...(o.foraDaLista ?? {}) }
   const deFora = { ...(o.commitDeFora ?? {}) }
   const deForaTudo = { ...(o.commitDeForaTudo ?? {}) }
   const suja = { ...(o.suja ?? {}) }
-  const dump = { ...(o.dump ?? {}) }
-  const caminhoDump = o.caminhoDump ?? DUMP
-  const ignoraDump = { ...(o.ignoraDump ?? {}) }
   const falhaCommit = { ...(o.falhaCommit ?? {}) }
   const raiz = o.raiz ?? 'C:/repo'
   const arquivos = o.arquivos ?? ['x/a.js']
@@ -90,8 +82,12 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   const chamadas = []
   const logs = []
   const novoSha = () => `sha${String(estado.git.length).padStart(5, '0')}`
-  const limpo = () => !estado.sujo && estado.dumps.length === 0
-  const pendencias = () => [...(estado.sujo ? [' M x/a.js'] : []), ...estado.dumps.map(d => `?? ${d}`)]
+  const caminhoDe = linha => linha.slice(3)
+  const pendencias = () => {
+    const doWorker = estado.sujo ? arquivosGit.map(a => ` M ${a}`) : []
+    return [...doWorker, ...estado.alheios.filter(l => !doWorker.some(d => caminhoDe(d) === caminhoDe(l)))]
+  }
+  const limpo = () => pendencias().length === 0
 
   const responder = async (prompt, opt) => {
     chamadas.push({ label: opt.label, phase: opt.phase, agentType: opt.agentType, model: opt.model, effort: opt.effort, schema: opt.schema, prompt })
@@ -187,24 +183,16 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       const f = l.slice(8)
       const { commita: recusaDepois, ...recusa } = o.recusa?.[f] ?? {}
       if (o.recusa?.[f] && !recusaDepois) return { commitado: false, recusado: true, ...recusa }
-      // Segue o prompt, salvo ignoraDump: o dump do bash na raiz é apagado e informado, nunca listado como fora da lista.
-      const naRaiz = estado.dumps.filter(d => !d.includes('/'))
-      const listaDump = naRaiz.length > 0 && ignoraDump[f] > 0
-      if (listaDump) ignoraDump[f]--
-      const listados = listaDump ? naRaiz : []
-      if (!listaDump) estado.dumps = estado.dumps.filter(d => d.includes('/'))
-      const descartados = [...(listaDump ? [] : naRaiz), ...(o.apagaAlem?.[f] ?? [])]
-      const com = r => (descartados.length ? { ...r, descartados } : r)
-      if (fora[f] > 0) { fora[f]--; return com({ commitado: false, foraDaLista: [...listados, 'y/b.js'] }) }
-      if (listados.length) return com({ commitado: false, foraDaLista: listados })
-      if (gate[f] > 0) { gate[f]--; return com({ commitado: false, gateFalhou: true, motivo: 'lint' }) }
-      if (falhaCommit[f]) { const motivo = falhaCommit[f]; delete falhaCommit[f]; return com({ commitado: false, motivo }) }
-      if (!estado.sujo) return com({ commitado: false, motivo: 'nada a commitar' })
+      // Commita só os arquivos da lista: a sujeira alheia fica, salvo arquivo da lista que já estava sujo (vai inteiro).
+      if (gate[f] > 0) { gate[f]--; return { commitado: false, gateFalhou: true, motivo: 'lint' } }
+      if (falhaCommit[f]) { const motivo = falhaCommit[f]; delete falhaCommit[f]; return { commitado: false, motivo } }
+      if (!estado.sujo) return { commitado: false, motivo: 'nada a commitar' }
       const sha = novoSha()
       estado.git.push(sha)
       estado.sujo = false
-      if (recusaDepois) return com({ commitado: true, commit: sha, recusado: true, ...recusa })
-      return com({ commitado: true, commit: o.shaErrado?.[f] ?? sha })
+      estado.alheios = estado.alheios.filter(l => !arquivosGit.includes(caminhoDe(l)))
+      if (recusaDepois) return { commitado: true, commit: sha, recusado: true, ...recusa }
+      return { commitado: true, commit: o.shaErrado?.[f] ?? sha }
     }
     // worker, ajuste ou correção
     if (o.jaResolvidoCorrecao && opt.phase === 'Corrigir' && !l.includes('ajuste')) {
@@ -221,8 +209,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (r && o.aprendizados?.[l]) r.aprendizados = o.aprendizados[l]
     if (r && deFora[l]) { estado.git.push(deFora[l]); delete deFora[l] }
     if (r && deForaTudo[l]) { estado.git.push(deForaTudo[l]); estado.sujo = false; delete deForaTudo[l] }
-    if (r && suja[l] > 0) { suja[l]--; estado.sujo = true }
-    if (dump[l] > 0) { dump[l]--; if (!estado.dumps.includes(caminhoDump)) estado.dumps.push(caminhoDump) }
+    if (r && suja[l]) { estado.alheios.push(` M ${suja[l]}`); delete suja[l] }
     return r
   }
   const parallel = thunks => Promise.all(thunks.map(t => t().catch(() => null)))

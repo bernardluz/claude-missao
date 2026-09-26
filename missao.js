@@ -129,23 +129,14 @@ const SAIDA_EM_ARQUIVO =
   'Nunca leia a saída por pipe (`| tail`, `| head`, `| tee`): um daemon que o comando deixa vivo, como o do compilador ' +
   'Kotlin, herda o pipe e o comando nunca termina.'
 
-// `*.stackdump` não rastreado na raiz é dump de crash do bash do Windows (msys): artefato descartável do ambiente,
-// não mudança de ninguém. O agente de commit o apaga; até lá, as conferências o toleram em vez de parar a missão.
-const DUMP_DO_BASH = '`*.stackdump` não rastreado na raiz do repositório é dump de crash do bash do Windows (msys), ' +
-  'artefato descartável do ambiente'
-const ehDump = caminho => /^[^/]+\.stackdump$/i.test(caminho)
-function arvoreLimpa(c) {
-  if (c.limpo) return true
-  const linhas = (c.pendencias ?? []).map(l => l.trim()).filter(Boolean)
-  const dumps = linhas.map(l => /^\?\? "?(.+?)"?$/.exec(l)?.[1]).filter(p => p && ehDump(p))
-  if (linhas.length === 0 || dumps.length < linhas.length) return false
-  log(`dump de crash do bash na raiz, tolerado como artefato do ambiente: ${dumps.join(', ')}`)
-  return true
-}
-function pendenciasDe(c) {
-  const linhas = (c.pendencias ?? []).map(l => l.trim()).filter(Boolean)
-  if (linhas.length === 0) return ''
-  return `: ${linhas.slice(0, 10).join(', ')}${linhas.length > 10 ? ` e mais ${linhas.length - 10}` : ''}`
+// Árvore suja não para a missão: cada commit leva só os arquivos que o worker declarou. O que já estava sujo no
+// preparo (sujeiraInicial) e o que outras sessões deixam na árvore ficam onde estão, fora dos commits.
+// Caminhos das linhas do `git status --porcelain` (renomeação conta os dois lados).
+function caminhosPendentes(c) {
+  return (c.pendencias ?? []).flatMap(l => {
+    const p = l.replace(/\r$/, '').slice(3).trim()
+    return p.includes(' -> ') ? p.split(' -> ') : [p]
+  }).map(p => normalizar(p.replace(/^"|"$/g, ''))).filter(Boolean)
 }
 
 const RESULTADO_FEATURE = {
@@ -168,8 +159,6 @@ const RESULTADO_COMMIT = {
     commit: { type: 'string' },
     gateFalhou: { type: 'boolean' },
     recusado: { type: 'boolean' },
-    foraDaLista: { type: 'array', items: { type: 'string' } },
-    descartados: { type: 'array', items: { type: 'string' } },
     motivo: { type: 'string' },
   },
   required: ['commitado'],
@@ -414,16 +403,21 @@ async function comRetentativa(rotulo, chamar, antesDeRetentar, max = MAX_RETENTA
 
 phase('Preparar')
 const preparo = await lerGit('HEAD', 'Preparar', 'preparo')
-if (!preparo || !arvoreLimpa(preparo) || !preparo.branch) {
+if (!preparo || !preparo.branch) {
   return {
     parouEm: 'preparo',
-    motivo: preparo
-      ? 'árvore com mudanças pendentes ou HEAD destacado; commits atômicos exigem partir de branch limpa'
-      : `não foi possível ler o git no preparo${causaGit()}`,
-    pendencias: preparo?.pendencias ?? [],
+    motivo: preparo ? 'HEAD destacado; a missão precisa de uma branch' : `não foi possível ler o git no preparo${causaGit()}`,
   }
 }
 log(`Branch ${preparo.branch}, base ${preparo.head}`)
+// Linha de base: mudanças não commitadas que já existiam (na retomada, somadas às da parada). Ignoradas pela missão;
+// arquivo dela que um worker editar vai inteiro no commit e vira aviso em sujeiraCommitada.
+const sujeiraInicial = [...new Set([
+  ...(Array.isArray(retomar?.sujeiraInicial) ? retomar.sujeiraInicial.filter(a => typeof a === 'string') : []),
+  ...caminhosPendentes(preparo),
+])]
+if (sujeiraInicial.length) log(`árvore com ${sujeiraInicial.length} mudança(s) não commitada(s) de antes: ficam fora dos commits (${sujeiraInicial.slice(0, 10).join(', ')})`)
+const sujeiraCommitada = Array.isArray(retomar?.sujeiraCommitada) ? [...retomar.sujeiraCommitada] : []
 
 let head = preparo.head
 // Início da missão inteira, preservado entre retomadas: define o que a suíte final cobre.
@@ -571,7 +565,7 @@ const mesmoSha = (a, b) => !!a && !!b && a.length >= 7 && b.length >= 7 && (a.st
 
 // Caminhos relativos à raiz, com barra normal, como o `git diff --name-only` devolve. Agentes no Windows
 // costumam devolver caminho absoluto (C:\...\arquivo) ou no formato do Git Bash (/c/...).
-const unificar = a => a.trim().replace(/\\/g, '/').replace(/^\/([a-z])\//i, '$1:/')
+function unificar(a) { return a.trim().replace(/\\/g, '/').replace(/^\/([a-z])\//i, '$1:/') }
 function normalizar(a) {
   const c = unificar(a).replace(/^\.\//, '')
   const raiz = unificar(preparo.raiz).replace(/\/+$/, '')
@@ -588,7 +582,8 @@ function promptTrabalho(f, extra) {
     (CONFIG.regrasProjeto ? ` exigida pelo ${CONFIG.regrasProjeto}` : '') +
     ' é o próximo passo deste workflow e o commit vem depois dela. Não tente lançar revisor.\n' +
     'Devolva em `arquivos` todos os caminhos que você criou, alterou ou removeu, relativos à raiz do repositório ' +
-    '(como o `git status` mostra).\n' +
+    '(como o `git status` mostra). A árvore pode ter mudanças de antes da missão ou de outras sessões: não as mexa ' +
+    'nem as declare, salvo o que esta feature precisar mudar.\n' +
     'Se o problema já estiver resolvido no código atual e não houver o que mudar, devolva concluida=true e jaResolvido=true.\n' +
     'Se não concluir, não descarte mudanças: devolva concluida=false explicando o bloqueio.\n' +
     GIT_PROIBIDO, f.guias ?? [])
@@ -601,12 +596,10 @@ function promptTrabalho(f, extra) {
 async function commitar(f, arquivos, fase, antes) {
   const chamar = aviso => agent(
     `Faça UM commit atômico da feature "${f.titulo}", já revisada e aprovada. Arquivos da feature: ${[...arquivos].join(', ')}.\n` +
-    '- confira `git status`; se houver mudança em caminho fora dessa lista, não commite: devolva commitado=false e ' +
-    'liste esses caminhos em foraDaLista;\n' +
-    `- arquivo ${DUMP_DO_BASH}: apague-o, informe o caminho em descartados e não o conte como mudança fora da lista. ` +
-    'No repositório, não apague mais nada;\n' +
-    '- inclua exatamente os caminhos da lista (`git add -- <paths>`, nunca `git add -A`); caminho da lista que não ' +
-    'aparece no `git status` (revertido no ajuste) é ignorado;\n' +
+    '- a árvore pode ter outras mudanças (de antes da missão ou de outras sessões): não são desta feature; não as ' +
+    'inclua, não as desfaça, não as apague;\n' +
+    '- inclua exatamente os caminhos da lista: `git add -- <paths>` e `git commit -F <arquivo> -- <paths>`, nunca ' +
+    '`git add -A` nem `git add .`; caminho da lista que não aparece no `git status` (revertido no ajuste) é ignorado;\n' +
     `- mensagem ${CONFIG.formatoCommit} em ${CONFIG.idioma} descrevendo a feature, gravada em arquivo temporário FORA do repositório ` +
     '(ex.: saída de `mktemp`), usada com `git commit -F <arquivo> -- <paths>` e apagada depois;\n' +
     '- rode o commit com a saída em arquivo, nunca por pipe, porque os hooks rodam gates: ' +
@@ -627,50 +620,29 @@ async function commitar(f, arquivos, fase, antes) {
       if (c.commits.length > 0) {
         // A lista só cresce e pode ter caminho revertido; o commit adotado precisa estar contido nela.
         const mesmos = c.arquivos.length > 0 && c.arquivos.every(a => naLista(arquivos, normalizar(a)))
-        if (c.branch === preparo.branch && arvoreLimpa(c) && c.commits.length === 1 && mesmos) return { commitado: true, commit: c.commits[0] }
+        if (c.branch === preparo.branch && c.commits.length === 1 && mesmos) return { commitado: true, commit: c.commits[0] }
         return { erro: `agente de commit caiu deixando ${c.commits.length} commit(s) que não correspondem à feature ` +
           `revisada (${c.commits.join(', ')}); pode haver commit de fora da missão` }
       }
       log(`commit: ${f.titulo}: agente não retornou (queda ou pulo manual), tentativa ${t + 1} de ${MAX_RETENTATIVAS_INFRA + 1}`)
       r = await chamar(aviso)
     }
-    const apagados = (r?.descartados ?? []).map(normalizar).filter(ehDump)
-    if (apagados.length) log(`${f.titulo}: agente de commit apagou dump de crash do bash: ${apagados.join(', ')}`)
     return r ?? { erro: `agente de commit não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas` }
   }
-  // Apagado no repositório além do dump; caminho que segue absoluto está fora dele (ex.: o arquivo da mensagem).
-  const indevidosDe = r => (r.descartados ?? []).map(normalizar).filter(a => !/^([a-z]:)?\//i.test(a) && !ehDump(a))
-  const soDump = r => !r.commitado && !r.recusado && !r.gateFalhou && indevidosDe(r).length === 0 &&
-    r.foraDaLista?.length > 0 && r.foraDaLista.every(a => ehDump(normalizar(a)))
-  let r = await tentar()
-  if (soDump(r)) {
-    // O dump não é da feature: em vez de virar apontamento, o commit é repetido uma vez com o aviso.
-    log(`${f.titulo}: agente de commit listou dump de crash do bash como fora da lista (${r.foraDaLista.join(', ')}); repetindo o commit`)
-    r = await tentar(`\nNa tentativa anterior você listou ${r.foraDaLista.join(', ')} como fora da lista: é dump de ` +
-      'crash do bash, apague-o e siga com o commit.')
-  }
+  const r = await tentar()
   if (r.erro) return { erro: r.erro }
   const feito = r.commitado && r.commit ? r.commit : null
-  // Recusa contornada ou arquivo apagado além do dump não se resolvem com ajuste: a decisão é humana.
-  const indevidos = indevidosDe(r)
-  const parar = r.recusado
-    ? `o harness recusou um comando do agente de commit, e a missão não contorna recusa: ${r.motivo ?? 'sem texto'}`
-    : indevidos.length ? `o agente de commit apagou o que não é dump de crash do bash: ${indevidos.join(', ')}` : null
+  // Recusa contornada não se resolve com ajuste: a decisão é humana.
+  const parar = r.recusado ? `o harness recusou um comando do agente de commit, e a missão não contorna recusa: ${r.motivo ?? 'sem texto'}` : null
   if (parar) return feito ? { commit: feito, parar } : { erro: `${parar}. Decida à mão, conferindo \`git status\` e \`git log\`` }
   if (feito) return { commit: feito }
   if (r.gateFalhou) return { apontamento: `gate do commit falhou: ${r.motivo ?? 'sem saída'}` }
-  const fora = (r.foraDaLista ?? []).filter(a => !ehDump(normalizar(a)))
-  if (fora.length) {
-    return { apontamento: `mudanças fora da lista da feature: ${fora.join(', ')}. Se forem desta feature, ` +
-      'declare-as em arquivos; se não, desfaça só elas' }
-  }
-  if (soDump(r)) return { erro: `o agente de commit não apagou o dump de crash do bash (${r.foraDaLista.join(', ')}); apague-o à mão` }
   // Sem commit e sem causa conhecida: um commit de fora da missão (ex.: `git commit -a`) pode ter levado o diff. Se
   // os arquivos da feature estão nesses commits e nenhum ficou pendente na árvore, a feature foi entregue por ele.
   const c = await lerGit(antes, fase)
   if (c?.commits.length && c.branch === preparo.branch && levouODiff(c, arquivos)) return { levadoPorFora: c }
   if (c?.commits.length) {
-    return { semDiff: arvoreLimpa(c), erro: `o agente de commit não commitou (${r.motivo ?? 'sem motivo'}), e ${antes}..HEAD tem ` +
+    return { semDiff: !caminhosPendentes(c).some(a => naLista(arquivos, a)), erro: `o agente de commit não commitou (${r.motivo ?? 'sem motivo'}), e ${antes}..HEAD tem ` +
       `commit de fora da missão: ${c.commits.join(', ')}, que pode ter levado o diff da feature. ${comoAceitar(c.head)}. ` +
       `Se aceitar e o diff da feature foi junto, inclua também "${f.titulo}" em retomar.concluidas` }
   }
@@ -719,8 +691,8 @@ const aceitar = headReal => 'ponha em retomar.commits a saída de `git rev-list 
 const aceitarDeFora = headReal => `${aceitar(headReal)}, e os SHAs de fora também em retomar.deFora, para não contarem como da missão`
 const comoAceitar = headReal => `Para aceitá-lo, ${aceitarDeFora(headReal)}; para recusá-lo, tire-o do histórico e ajuste retomar ao git resultante`
 
-// Logo depois do commit de cada feature: `antes..HEAD` tem de ser exatamente o commit declarado, com arquivos da lista
-// revisada e árvore limpa. naoAdotar: o commit não entra no `retomar`, porque não está no git ou tem arquivo não
+// Logo depois do commit de cada feature: `antes..HEAD` tem de ser exatamente o commit declarado (mais commits de fora
+// aceitos), com arquivos da lista revisada. Sujeira na árvore, da linha de base ou de outras sessões, não conta. naoAdotar: o commit não entra no `retomar`, porque não está no git ou tem arquivo não
 // revisado; sem ajuste, a retomada recusa.
 async function conferirCommit(f, commit, antes, arquivos, fase) {
   const c = await lerGit(antes, fase)
@@ -741,7 +713,14 @@ async function conferirCommit(f, commit, antes, arquivos, fase) {
       `${alheios.join(', ')}. Ele ficou fora do retomar. Para aceitá-lo, ${aceitar(c.head)}, e inclua "${f.titulo}" em ` +
       'retomar.concluidas; para recusá-lo, tire-o do histórico e retome sem mudar o retomar, e a feature se repete' }
   }
-  if (!arvoreLimpa(c)) return { motivo: `árvore com mudanças não commitadas depois do commit de "${f.titulo}"${pendenciasDe(c)}` }
+  // Arquivo que já estava sujo antes da missão e que o worker editou foi inteiro no commit: aviso, não parada.
+  const jaSujos = doCommit.map(normalizar).filter(a => sujeiraInicial.includes(a))
+  if (jaSujos.length) {
+    sujeiraCommitada.push({ feature: f.titulo, commit, arquivos: jaSujos })
+    // Já commitado, o arquivo deixa de ser sujeira de antes: os próximos commits dele não repetem o aviso.
+    for (const a of jaSujos) sujeiraInicial.splice(sujeiraInicial.indexOf(a), 1)
+    log(`aviso: "${f.titulo}" commitou inteiro arquivo que já tinha mudança antes da missão: ${jaSujos.join(', ')}`)
+  }
   return { novos: c.commits, head: c.head }
 }
 
@@ -760,8 +739,9 @@ async function implementar(features, fase) {
     // Worker que caiu: repete se não houve commit nem troca de branch. Se deixou diff parcial, o próximo continua dele.
     let parcial = false
     const r = await comRetentativa(f.titulo, () => trabalhar(promptTrabalho(f, parcial
-      ? '\nUma tentativa anterior caiu no meio: o diff não commitado atual é trabalho parcial desta feature. Continue a ' +
-        'partir dele e declare em `arquivos` também os caminhos que ela já tinha alterado (veja `git status`).'
+      ? '\nUma tentativa anterior caiu no meio: as mudanças não commitadas que não estavam na árvore antes da missão ' +
+        `(${sujeiraInicial.join(', ') || 'nenhuma'}) são trabalho parcial desta feature. Continue a partir delas e ` +
+        'declare em `arquivos` também os caminhos que ela já tinha alterado (veja `git status`).'
       : ''),
       { label: f.titulo, phase: fase, schema: RESULTADO_FEATURE },
     ), async () => {
@@ -771,7 +751,7 @@ async function implementar(features, fase) {
         return { ok: false, head: c.head, motivo: `branch ${c.branch}, HEAD ${c.head}, ${c.commits.length} commit(s) novo(s)` +
           (c.commits.length ? `: ${c.commits.join(', ')}` : '') }
       }
-      if (!arvoreLimpa(c)) parcial = true
+      if (caminhosPendentes(c).some(a => !sujeiraInicial.includes(a))) parcial = true
       return { ok: true }
     })
     if (r?.semRetentativa) {
@@ -784,8 +764,7 @@ async function implementar(features, fase) {
     }
     if (!r) return falhou(`agente não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas.${sujo}`)
     if (!r.concluida) return falhou(r.resumo + sujo)
-    // Dump do bash não é da feature, mesmo que o worker o declare.
-    const arquivos = new Set((r.arquivos ?? []).map(normalizar).filter(a => !ehDump(a)))
+    const arquivos = new Set((r.arquivos ?? []).map(normalizar))
     if (arquivos.size === 0) {
       // Só correção pode sair sem mudança; feature original precisa entregar algo.
       if (r.jaResolvido && fase === 'Corrigir') {
@@ -806,8 +785,8 @@ async function implementar(features, fase) {
         : ''
       const rev = await comRetentativa(`revisão: ${f.titulo}`, () => trabalhar(montar('revisar',
         `Revisão independente, antes do commit, da feature "${f.titulo}". Spec: ${f.spec}\n` +
-        'Todo o diff ainda não commitado é desta feature: veja `git status`, `git diff HEAD` (inclui o que estiver em ' +
-        `stage) e os arquivos novos. Arquivo ${DUMP_DO_BASH}: ignore-o. ` +
+        `O diff desta feature são os arquivos ${[...arquivos].join(', ')}: veja \`git diff HEAD -- <esses caminhos>\` ` +
+        '(inclui o que estiver em stage) e os novos entre eles. Outras mudanças na árvore não são desta feature: ignore-as. ' +
         'Aponte só problemas bloqueantes de correção, segurança, contrato ou testes faltantes.' +
         (blocoDesign(f.milestone)
           ? `${blocoDesign(f.milestone)}\nConfira a aderência ao desenho e ao checklist de UX só das telas e fluxos que ESTA ` +
@@ -845,7 +824,7 @@ async function implementar(features, fase) {
       ))
       if (!ajuste) return falhou(`agente de ajuste não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas.${sujo}`)
       if (!ajuste.concluida) return falhou(ajuste.resumo + sujo)
-      for (const a of (ajuste.arquivos ?? []).map(normalizar)) if (!ehDump(a)) arquivos.add(a)
+      for (const a of (ajuste.arquivos ?? []).map(normalizar)) arquivos.add(a)
       anteriores = problemas
     }
 
@@ -930,7 +909,6 @@ async function conferir(base, esperados, milestone, fase = 'Scrutiny') {
     esperados.splice(0, esperados.length, ...c.commits)
     head = c.head
   }
-  if (!arvoreLimpa(c)) return { ok: false, motivo: `árvore com mudanças não commitadas${pendenciasDe(c)}` }
   if (!mesmoSha(c.head, head)) return { ok: false, motivo: `HEAD real ${c.head} difere do declarado ${head}` }
   const bate = c.commits.length === esperados.length && c.commits.every((s, i) => mesmoSha(s, esperados[i]))
   if (!bate) return { ok: false, motivo: `commits do intervalo não batem com os declarados (real: ${c.commits.length}, declarados: ${esperados.length}); pode haver commit extra ou de outra sessão` }
@@ -1250,9 +1228,9 @@ function guiasDe(m) {
 function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
-    parouEm: m.titulo, ...extra, deForaTocando: [...deForaTocando], plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
+    parouEm: m.titulo, ...extra, deForaTocando: [...deForaTocando], sujeiraCommitada: [...sujeiraCommitada], plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
     sugestaoAprendizados: sugestaoAprendizados(),
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs } },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs }, sujeiraInicial: [...sujeiraInicial], sujeiraCommitada: [...sujeiraCommitada] },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1446,4 +1424,4 @@ for (const [i, m] of pendentes.entries()) {
 }
 
 const enxugar = MODO === 'enxugar' ? { modo: MODO, medicao: { antes: medicaoAntes, depois: medicaoDepois, ...(antesParcial ? { antesParcial: true } : {}) } } : {}
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, deForaTocando, ...enxugar, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, deForaTocando, sujeiraCommitada, ...enxugar, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
