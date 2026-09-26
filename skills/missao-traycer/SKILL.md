@@ -121,7 +121,8 @@ revisor (achado grave de UX, como pedir ID digitado, é bloqueante) e ao user te
 Uma feature por vez. Ticket em status 1.
 
 1. **Implementar.** Crie um filho novo (`traycer_create_agent`, mesmo workspace) e mande: spec da feature, guia do
-   da área, `regrasTestes`, `regrasProjeto`. Proibido: commit, amend, stash, push, trocar de branch, reset/checkout
+   da área, `regrasTestes`, `regrasProjeto`. Ele devolve a lista de arquivos (renomeação com origem e destino).
+   Proibido: commit, add, amend, stash, push, trocar de branch, reset/checkout
    destrutivo, `--no-verify`, criar agentes e `proibicoesExtras`. Ele escreve os próprios testes. Cite no briefing as
    [Regras para todos](#regras-para-todos). Se a feature usar escape Unicode, inclua o aviso de
    [Escapes Unicode](#escapes-unicode). Inclua também as **lições** da missão: regras que um revisor ou gate já cobrou
@@ -136,7 +137,9 @@ Uma feature por vez. Ticket em status 1.
    é você: o revisor só lê e não cria artefato.
 4. **Ajustar.** Com apontamentos, devolva-os ao **mesmo** implementador. Na volta, repita o passo 2 e mande o novo
    diff ao **mesmo** revisor, continuando a conversa. Passou de `maxRodadasRevisao`: pare.
-5. **Commit.** Só com `aprovado` na última rodada e sem mudança depois dela. Você commita, sem tocar no código:
+5. **Commit.** Só com `aprovado` na última rodada e sem mudança depois dela. Antes, compare o `git status` com o
+   de antes do implementador: mudança nova fora da lista, que não é linha de base nem de outra sessão, volta a ele
+   para declarar ou desfazer. Você commita, sem tocar no código:
    `git add -- <arquivos revisados>`, confira que `git diff -- <arquivos revisados>` está vazio (o stage é
    exatamente o que foi revisado) e rode o commit com a mensagem pela entrada padrão e a saída em arquivo, porque os
    hooks rodam gates:

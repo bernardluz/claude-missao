@@ -18,7 +18,8 @@ Para cada milestone:
   Prova de contrato → premissas sobre outros serviços conferidas no código do dono; falsa PARA
   UI/UX             → só com tela: desenha telas e fluxos com checklist de UX, sem esperar aprovação
   Para cada feature, em série:
-    implementa (sem commit) → revisão independente → ajustes até aprovar → commit atômico → conferência
+    implementa (worker nunca commita) → revisão independente → ajustes até aprovar → leitura do git →
+    commit fixo da lista → conferência
   Scrutiny ⇄ Corrigir   (testes, lint, typecheck e revisão contra o critério)
   Caça bug ⇄ Corrigir   (caçador por área; cada achado com 2 verificadores; só o confirmado vira correção)
   User testing ⇄ Corrigir   (só com m.userTesting: a jornada na stack local)
@@ -75,11 +76,17 @@ cortes explícitos e critérios de aceite verificáveis.
 
 **Garantias:**
 
-- **Commit só com revisão.** O agente de commit nunca altera código. Se um gate do commit falha, a
-  falha vira ajuste e passa pela revisão de novo.
-- **Recusa não é contornada.** Se o harness ou o classificador de permissões recusa um comando, o
-  agente de commit não tenta de outro jeito: devolve o texto da recusa, e a missão para, porque a
-  decisão é humana. Se o commit já tinha sido feito, ele entra no `retomar`.
+- **Commit por feature, feito pela missão.** O worker nunca commita: devolve a lista de arquivos (renomeação
+  com origem e destino) e a mensagem do commit no formato do projeto. Depois da revisão aprovada, a missão lê
+  o git: mudança nova fora da lista (e fora da linha de base, da sujeira alheia já vista e do `naoSao` do
+  worker) volta ao worker para declarar ou desfazer. Aí um agente barato só executa o comando fixo
+  `git add -- <lista> && git commit -F <mensagem> -- <lista>`. Se um gate do commit falha, a falha vira
+  ajuste e passa pela revisão de novo. Depois do commit, a conferência separa os commits do intervalo: da
+  feature (só arquivos da lista, inclusive um que o worker tenha feito sozinho), de fora (aceito) ou misto
+  (arquivo da feature com arquivo não revisado: fica fora do `retomar` e a missão para).
+- **Recusa não é contornada.** Se o harness ou o classificador de permissões recusa o comando de commit, o
+  agente não tenta de outro jeito: devolve o texto da recusa, e a missão para, porque a decisão é humana. Se
+  o commit já tinha sido feito, ele entra no `retomar`.
 - **Git conferido por script.** A conferência não depende da leitura de um modelo. Um agente barato
   (`modeloConferencia`) só roda `node .claude/missao/git-estado.mjs <base>` e devolve a saída literal.
   O workflow interpreta o JSON: branch, árvore limpa, a lista exata de commits em ordem e os arquivos.
@@ -221,7 +228,7 @@ descartável `missao-teste/`.
 | `retomar` | — | Objeto `retomar` devolvido pela execução que parou |
 | `config` | — | Ajusta só `formatoCommit`, `idioma` e `exemplosSkills` nesta execução. Revisor, leitor e proibições vêm sempre da configuração instalada |
 
-**Custo esperado:** cerca de `8 + 4 × features + 7 × milestones` agentes (mais 2 com `spec`, um
+**Custo esperado:** cerca de `8 + 5 × features + 7 × milestones` agentes (mais 2 com `spec`, um
 por área a mais de caça e um por user testing), sem contar correções, verificadores de achados e
 retentativas. O log mostra a estimativa de cada execução. A suíte final pode levar muito tempo,
 conforme o projeto.
