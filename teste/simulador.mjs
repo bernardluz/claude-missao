@@ -52,6 +52,7 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   userTesting        { [milestone]: [n falhas por rodada] } resultado do user testing
 //   semMedicao         o pré-voo não devolve a medição mesmo quando o prompt a pede
 //   ui                 { [milestone]: texto } telas que o agente barato detecta (padrão: nenhuma)
+//   utUx               [[bool por problema] por rodada] quais falhas do user testing são de UX
 //   designLinks        links que o agente de UI/UX devolve
 //   foraImpacta     resposta do agente que julga commit de fora (padrão true: para como antes)
 //   conferenciaErro    texto de erro que o agente de conferência sempre devolve (ex.: erro do git)
@@ -173,7 +174,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       const i = rodadaUT[m] ?? 0
       rodadaUT[m] = i + 1
       const n = (o.userTesting?.[m] ?? [])[i] ?? 0
-      return { aprovado: n === 0, problemas: problemas(n, 'u') }
+      return { aprovado: n === 0, problemas: problemas(n, 'u').map((p, j) => (o.utUx?.[i]?.[j] ? { ...p, ux: true } : p)) }
     }
     if (opt.phase === 'Scrutiny') {
       if (l.startsWith('testes: ')) return { aprovado: true, problemas: [] }

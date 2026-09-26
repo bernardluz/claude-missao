@@ -1256,11 +1256,39 @@ describe('UI/UX por milestone', () => {
     assert.doesNotMatch(r.prompt('F2'), /Desenho de UI\/UX/)
   })
 
-  test('resultado traz designs com links, texto e os desvios do user testing', async () => {
-    const r = await rodarCom({}, comTela(), { userTesting: { M1: [1, 0] }, designLinks: ['https://claude.ai/design/x'] })
+  test('resultado traz designs com links e texto; desvios resolvidos não ficam', async () => {
+    const r = await rodarCom({}, comTela(), { userTesting: { M1: [1, 0] }, utUx: [[true]], designLinks: ['https://claude.ai/design/x'] })
     assert.deepEqual(r.resultado.designs, [{
-      milestone: 'M1', links: ['https://claude.ai/design/x'], texto: 'desenho de M1: seletor pesquisável de conta', desvios: ['u0'],
+      milestone: 'M1', links: ['https://claude.ai/design/x'], texto: 'desenho de M1: seletor pesquisável de conta', desvios: [],
     }])
+  })
+
+  test('desvios: só os de UX e só os da última rodada', async () => {
+    const r = await rodarCom({}, comTela(), { userTesting: { M1: [2, 2] }, utUx: [[true, true], [false, true]] })
+    assert.equal(r.resultado.parouEm, 'M1')
+    assert.deepEqual(r.resultado.designs[0].desvios, ['u1'])
+    assert.match(r.prompt('user testing: M1'), /cada desvio vira problema, com ux=true/)
+  })
+
+  test('revisão só cobra as telas desta feature, não o que outra feature ainda vai entregar', async () => {
+    const r = await rodarCom({}, comTela())
+    assert.match(r.prompt('revisão: F1'), /só das telas e fluxos que ESTA feature cria ou muda/)
+    assert.match(r.prompt('revisão: F1'), /O que outra feature do milestone ainda vai entregar \(outra tela, um ponto de entrada em outra tela\) não é achado/)
+    assert.match(r.prompt('revisão: F1'), /Feature sem tela não tem achado de UX/)
+  })
+
+  test('detecção de telas que cai não grava nada, para a retomada tentar de novo', async () => {
+    const r = await rodar(plano({ maxRetentativasInfra: 0 }), { quedas: { 'telas: M1': 1 }, validacao: [2, 2] })
+    assert.equal(r.resultado.parouEm, 'M1')
+    assert.equal('M1' in r.resultado.retomar.designs, false)
+    assert.ok(r.logs.some(l => /M1: o agente que detecta telas não respondeu/.test(l)))
+  })
+
+  test('no modo enxugar, o bloco do desenho leva o complemento ui-ux.enxugar', async () => {
+    const r = await rodarCom({}, { spec: 's.md', modo: 'enxugar' }, { ui: { M1: 'tela de contas' } })
+    assert.match(r.prompt('F1'), /Desenho de UI\/UX[\s\S]*Modo enxugar: desenhe só as telas que mudam/)
+    const normal = await rodarCom({}, { spec: 's.md' }, { ui: { M1: 'tela de contas' } })
+    assert.doesNotMatch(normal.prompt('F1'), /desenhe só as telas que mudam/)
   })
 
   test('agente de UI/UX que cai não para a missão', async () => {

@@ -216,7 +216,11 @@ const VALIDACAO = {
       type: 'array',
       items: {
         type: 'object',
-        properties: { arquivo: { type: 'string' }, problema: { type: 'string' }, ambiente: { type: 'boolean' } },
+        properties: {
+          arquivo: { type: 'string' }, problema: { type: 'string' }, ambiente: { type: 'boolean' },
+          // user testing: desvio de UX ou de aderência ao desenho.
+          ux: { type: 'boolean' },
+        },
         required: ['problema'],
       },
     },
@@ -506,7 +510,8 @@ function blocoDesign(titulo) {
   if (!d || d.semTela || (!d.texto && !d.links?.length)) return ''
   return `\nDesenho de UI/UX do milestone (siga-o nas telas e fluxos de usuário):\n${d.texto}` +
     (d.links?.length ? `\nLinks do desenho: ${d.links.join(' ')}` : '') +
-    (ETAPAS['ui-ux'] ? `\n${ETAPAS['ui-ux']}` : '')
+    (ETAPAS['ui-ux'] ? `\n${ETAPAS['ui-ux']}` : '') +
+    (MODO === 'enxugar' && ETAPAS['ui-ux.enxugar'] ? `\n${ETAPAS['ui-ux.enxugar']}` : '')
 }
 const MEDIR = 'Meça também o alvo desta missão e devolva em medicao: linhas de código (sem testes), tabelas vivas, ' +
   'filas/listeners, arquivos e testes, e em medicao.comandos os comandos que usou.'
@@ -811,8 +816,11 @@ async function implementar(features, fase) {
         `stage) e os arquivos novos. Arquivo ${DUMP_DO_BASH}: ignore-o. ` +
         'Aponte só problemas bloqueantes de correção, segurança, contrato ou testes faltantes.' +
         (blocoDesign(f.milestone)
-          ? `${blocoDesign(f.milestone)}\nConfira a aderência das telas desta feature ao desenho e ao checklist de UX. Achado ` +
-            'grave de UX (pedir ID ou UUID digitado à mão, ação destrutiva sem confirmação, tela sem ponto de entrada) é bloqueante.'
+          ? `${blocoDesign(f.milestone)}\nConfira a aderência ao desenho e ao checklist de UX só das telas e fluxos que ESTA ` +
+            'feature cria ou muda. O que outra feature do milestone ainda vai entregar (outra tela, um ponto de entrada em ' +
+            'outra tela) não é achado desta revisão. Feature sem tela não tem achado de UX. Achado grave de UX nas telas ' +
+            'desta feature (pedir ID ou UUID digitado à mão, ação destrutiva sem confirmação, tela nova sem ponto de ' +
+            'entrada que ela mesma deveria criar) é bloqueante.'
           : '') +
         memoria + '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, f.guias ?? []),
         { label: `revisão: ${f.titulo}`, phase: fase, agentType: revisorPara([...arquivos]), schema: VALIDACAO },
@@ -1087,7 +1095,12 @@ async function desenharUi(m, aFazer) {
       'fluxos, numa linha cada; senão devolva ui vazio. Não rode nada.',
       { label: `telas: ${m.titulo}`, phase: 'UI/UX', schema: TELAS, model: CONFIG.modeloConferencia, effort: 'low' },
     ))
-    ui = r?.ui?.trim()
+    // Agente que caiu não decide nada: sem registro, a retomada tenta de novo.
+    if (!r) {
+      log(`${m.titulo}: o agente que detecta telas não respondeu; a missão segue sem UI/UX para este milestone`)
+      return
+    }
+    ui = r.ui?.trim()
   }
   if (!ui) {
     designs[m.titulo] = { semTela: true }
@@ -1204,7 +1217,7 @@ async function testarComoUsuario(m, anteriores) {
     'para produção nem use credencial real. Não altere código. Ao terminar, derrube o que subiu e deixe a árvore como ' +
     'estava. Aprove só se a jornada inteira funcionar; cada falha vira um problema com o passo e a evidência. Se não ' +
     `der para subir a stack (ambiente), marque ambiente=true.` +
-    (blocoDesign(m.titulo) ? `${blocoDesign(m.titulo)}\nConfira as telas prontas contra o desenho e o checklist de UX: cada desvio vira problema.` : '') +
+    (blocoDesign(m.titulo) ? `${blocoDesign(m.titulo)}\nConfira as telas prontas contra o desenho e o checklist de UX: cada desvio vira problema, com ux=true.` : '') +
     `${memoria}\n${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`, guiasDe(m)),
     { label: `user testing: ${m.titulo}`, phase: 'User testing', schema: VALIDACAO },
   ))
@@ -1215,7 +1228,8 @@ async function testarComoUsuario(m, anteriores) {
     return { erro: `o user testing não roda por causa do ambiente: ${deAmbiente.map(p => p.problema).join(' | ')}. Ajuste o ambiente e retome` }
   }
   const d = designs[m.titulo]
-  if (d && !d.semTela) d.desvios = [...new Set([...(d.desvios ?? []), ...r.problemas.map(textoDoAchado)])]
+  // Só os desvios de UX da última rodada: o que as correções já resolveram não fica para o usuário revisar.
+  if (d && !d.semTela) d.desvios = r.problemas.filter(p => p.ux === true).map(textoDoAchado)
   return { aprovado: r.aprovado, problemas: r.problemas }
 }
 
