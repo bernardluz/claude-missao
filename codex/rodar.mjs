@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { instalar } from '../instalar.mjs'
-import { criarAgenteCodex } from './agente.mjs'
+import { criarAgenteCodex, exigirModelo } from './agente.mjs'
 
 const FuncaoAssincrona = Object.getPrototypeOf(async function () {}).constructor
 const json = p => JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, ''))
@@ -45,6 +45,7 @@ export async function executarFluxo(fonte, args, { agent, registrar = () => {} }
 
 export async function rodarMissao({ projeto, args, retomar, pastaEstado, comando, modelo, aprovacao = 'never', concorrencia = 2, timeoutMs, signal, aoEvento = () => {} }) {
   if (!projeto || (!!args === !!retomar)) throw new Error('informe projeto e exatamente um de args ou retomar')
+  modelo = exigirModelo(modelo)
   projeto = realpathSync(projeto)
   const git = (...a) => execFileSync('git', ['-C', projeto, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
   if (realpathSync(git('rev-parse', '--show-toplevel')) !== projeto) throw new Error('projeto deve ser a raiz do checkout')
@@ -76,7 +77,7 @@ export async function rodarMissao({ projeto, args, retomar, pastaEstado, comando
   try {
     pasta = join(pastaEstado, `execucao-${randomUUID()}`)
     mkdirSync(pasta, { mode: 0o700 })
-    gravar(join(pasta, 'entrada.json'), { args, modelo: modelo ?? null, aprovacao, concorrencia })
+    gravar(join(pasta, 'entrada.json'), { args, modelo, aprovacao, concorrencia })
     const registrar = evento => {
       appendFileSync(join(pasta, 'eventos.jsonl'), JSON.stringify({ instante: new Date().toISOString(), ...evento }) + '\n', { mode: 0o600 })
       if (evento.tipo === 'fase') { estado.fase = evento.fase; gravar(join(pasta, 'estado.json'), estado) }
@@ -115,16 +116,17 @@ export async function main(argv = process.argv.slice(2)) {
     'timeout-ms': { type: 'string', default: '1800000' }, help: { type: 'boolean' },
   } })
   if (v.help) {
-    console.log('node codex/rodar.mjs --projeto <raiz> (--args <JSON> | --retomar <resultado.json>) [--estado <pasta fora do repo>] [--modelo <modelo>] [--aprovacao never|auto] [--concorrencia 1..6] [--timeout-ms 1800000]')
+    console.log('node codex/rodar.mjs --projeto <raiz> (--args <JSON> | --retomar <resultado.json>) [--estado <pasta fora do repo>] --modelo <modelo> [--aprovacao never|auto] [--concorrencia 1..6] [--timeout-ms 1800000]')
     return 0
   }
   if (!v.projeto || (!!v.args === !!v.retomar)) throw new Error('informe --projeto e exatamente um de --args ou --retomar')
+  const modelo = exigirModelo(v.modelo)
   const controller = new AbortController()
   const cancelar = () => controller.abort()
   process.once('SIGINT', cancelar); process.once('SIGTERM', cancelar)
   try {
     const r = await rodarMissao({ projeto: v.projeto, args: v.args ? json(v.args) : undefined, retomar: v.retomar,
-      pastaEstado: v.estado, modelo: v.modelo, aprovacao: v.aprovacao, concorrencia: Number(v.concorrencia), timeoutMs: Number(v['timeout-ms']), signal: controller.signal,
+      pastaEstado: v.estado, modelo, aprovacao: v.aprovacao, concorrencia: Number(v.concorrencia), timeoutMs: Number(v['timeout-ms']), signal: controller.signal,
       aoEvento: e => { if (e.tipo === 'fase') console.log(`fase: ${e.fase}`) },
     })
     console.log(`resultado: ${r.arquivoResultado}`)

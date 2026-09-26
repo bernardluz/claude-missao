@@ -73,7 +73,15 @@ function processo(comando, argumentos, prompt, pasta, timeoutMs, signal) {
   })
 }
 
+export function exigirModelo(modelo) {
+  if (typeof modelo !== 'string' || !modelo.trim()) {
+    throw new Error('Qual modelo você quer usar nesta missão? Informe a escolha do usuário em --modelo <modelo>.')
+  }
+  return modelo.trim()
+}
+
 export function criarAgenteCodex({ projeto, registros, comando, modelo, aprovacao = 'never', concorrencia = 2, timeoutMs = 30 * 60_000, home = homedir(), signal, registrar = () => {} }) {
+  modelo = exigirModelo(modelo)
   projeto = realpathSync(projeto)
   if (!['never', 'auto'].includes(aprovacao)) throw new Error('aprovação inválida; use never ou auto')
   if (!Number.isInteger(concorrencia) || concorrencia < 1 || concorrencia > 6) throw new Error('concorrência deve estar entre 1 e 6')
@@ -112,7 +120,7 @@ export function criarAgenteCodex({ projeto, registros, comando, modelo, aprovaca
       const argv = ['--no-daemon', ...(auto ? [] : ['--ask-for-approval', 'never']), 'exec',
         ...(auto ? ['--approve-for-me'] : []), '--sandbox', sandbox, '--cd', projeto, '--ephemeral',
         '--json', '--color', 'never', '--output-schema', schemaPath, '--output-last-message', resultadoPath,
-        ...(modelo ? ['--model', modelo] : []), '-']
+        '--model', modelo, '-']
       const briefing = 'Você executa um passo de um workflow controlado. Respeite AGENTS.md e as permissões; não crie outros agentes. ' +
         'Não faça push/deploy nem altere configurações globais. Não está sozinho no checkout: preserve trabalho alheio. ' +
         'Se houver recusa de permissão, pare sem contornar e devolva bloqueado=true, motivo e resultado=null. ' +

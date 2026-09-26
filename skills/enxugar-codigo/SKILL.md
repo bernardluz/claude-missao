@@ -89,7 +89,11 @@ Verificáveis por teste ou comando, incluindo a medição final.
 
 Aprovada a SPEC, grave-a no projeto. Os argumentos da missão são `{ "spec": "<caminho>", "modo": "enxugar" }`.
 
-- **Claude Code:** execute o workflow `missao` com esses argumentos.
-- **Codex:** grave esses argumentos em JSON e execute `node "{{CLAUDE_MISSAO}}/codex/rodar.mjs" --projeto "<raiz>" --args "<argumentos.json>"`.
+**No Codex, antes de iniciar ou retomar**, pergunte: **"Qual modelo você quer usar nesta missão?"**
+Aguarde a resposta do usuário. Sem resposta explícita, não inicie a missão. Não use automaticamente o modelo do CLI, da conversa ou da execução anterior.
+A escolha vale para todos os agentes dessa execução; não pergunte por subagente. Se o modelo escolhido falhar, pare sem substituir por outro.
 
-O projeto precisa da missão instalada por `instalar.mjs <projeto>`. No Codex, a aprovação padrão é `never`: uma operação que exige permissão faz a missão parar. Revisão automática de permissões (`--aprovacao auto`) exige autorização explícita; nunca usar bypass. Retome uma parada normal com `--retomar "<resultado.json>"`. O resultado traz `medicao` com antes e depois para preencher a tabela. Não trate logs de execução interrompida como resultado retomável.
+- **Claude Code:** execute o workflow `missao` com esses argumentos.
+- **Codex:** grave esses argumentos em JSON e execute `node "{{CLAUDE_MISSAO}}/codex/rodar.mjs" --projeto "<raiz>" --args "<argumentos.json>" --modelo "<modelo-escolhido>"`.
+
+O projeto precisa da missão instalada por `instalar.mjs <projeto>`. No Codex, a aprovação padrão é `never`: uma operação que exige permissão faz a missão parar. Revisão automática de permissões (`--aprovacao auto`) exige autorização explícita; nunca usar bypass. Retome uma parada normal com `--retomar "<resultado.json>" --modelo "<modelo-escolhido>"`. O resultado traz `medicao` com antes e depois para preencher a tabela. Não trate logs de execução interrompida como resultado retomável.

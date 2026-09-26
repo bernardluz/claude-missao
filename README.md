@@ -216,12 +216,12 @@ Requisitos: Node >= 20, Git, Codex CLI autenticado (no Windows, `codex.exe` no P
 
 ```powershell
 # argumentos.json contém { "spec": "docs/minha-spec.md" } ou { "milestones": [...] }
-node codex/rodar.mjs --projeto "C:/projetos/exemplo" --args "C:/temporario/argumentos.json"
+node codex/rodar.mjs --projeto "C:/projetos/exemplo" --args "C:/temporario/argumentos.json" --modelo "<modelo-escolhido>"
 # Após uma parada normal, use o arquivo que o executor imprimiu:
-node codex/rodar.mjs --projeto "C:/projetos/exemplo" --retomar "C:/Users/eu/.codex/missoes/execucao-.../resultado.json"
+node codex/rodar.mjs --projeto "C:/projetos/exemplo" --retomar "C:/Users/eu/.codex/missoes/execucao-.../resultado.json" --modelo "<modelo-escolhido>"
 ```
 
-Também disponível: `npm run missao:codex -- --help`. `--modelo` escolhe explicitamente um modelo Codex; sem ele, modelo e esforço seguem a configuração do CLI. Nomes/hints Claude como `haiku`, `sonnet` e `effort` não são repassados como seleção de modelo Codex. Papéis Markdown são procurados no projeto (`.codex/agents`, depois `.claude/agents`) e no usuário, nessa ordem. Frontmatter de ferramentas/modelo não vira permissão nativa; papel ausente para a execução em vez de remover a revisão.
+Também disponível: `npm run missao:codex -- --help`. **Antes de cada início ou retomada**, pergunte ao usuário: **"Qual modelo você quer usar nesta missão?"** Aguarde a resposta e passe a escolha em `--modelo`, obrigatório em toda execução. Sem escolha explícita, o executor para antes de ler projeto/argumentos ou criar registros/lock. Não usar modelo padrão do CLI, da conversa ou da execução anterior. Uma escolha vale para todos os agentes daquela execução; se ela falhar, parar sem fallback. O esforço continua seguindo a configuração do CLI. Nomes/hints Claude como `haiku`, `sonnet` e `effort` não são repassados como seleção de modelo Codex. Papéis Markdown são procurados no projeto (`.codex/agents`, depois `.claude/agents`) e no usuário, nessa ordem. Frontmatter de ferramentas/modelo não vira permissão nativa; papel ausente para a execução em vez de remover a revisão.
 
 ### Permissões e falhas
 
