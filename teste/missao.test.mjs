@@ -1340,3 +1340,23 @@ describe('linha de base e diff pendente na parada', () => {
     assert.deepEqual(p2.resultado.retomar?.sujeiraInicial ?? [], [])
   })
 })
+
+describe('pasta nova e retomada', () => {
+  test('arquivo de pasta nova declarado pelo arquivo não vira mudança fora da lista', async () => {
+    const r = await rodar(plano(), { arquivos: ['pkg/novo/A.kt'], arquivosGit: ['pkg/novo/A.kt'] })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('F1 · ajuste'), 0)
+    assert.match(r.prompt('commit: F1'), /git add -- 'pkg\/novo\/A\.kt'/)
+  })
+
+  test('pasta declarada pela feature que parou não vira linha de base na retomada', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const opcoes = { arquivos: ['pkg/'], arquivosGit: ['pkg/novo/A.kt'] }
+    const p1 = await rodar(plano(), { ...opcoes, revisaoFeature: { F1: [1, 1, 1, 1] } }, estado)
+    assert.deepEqual(p1.resultado.retomar.arquivosPendentes, ['pkg/'])
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), opcoes, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.ok(!p2.logs.some(l => /mudança\(s\) não commitada\(s\) de antes/.test(l)))
+    assert.match(p2.prompt('commit: F1'), /git add -- 'pkg\/novo\/A\.kt'/)
+  })
+})

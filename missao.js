@@ -412,10 +412,11 @@ log(`Branch ${preparo.branch}, base ${preparo.head}`)
 // Linha de base: mudanças não commitadas que já existiam (na retomada, somadas às da parada). Ignoradas pela missão;
 // arquivo dela que um worker editar vai inteiro no commit e vira aviso em sujeiraCommitada.
 // O diff da feature que ficou sem commit na parada (retomar.arquivosPendentes) é da missão, não linha de base.
-const pendentesDaParada = Array.isArray(retomar?.arquivosPendentes) ? retomar.arquivosPendentes : []
+// Comparação por naLista: a lista pode declarar uma pasta nova (`pkg/`) e o git listar os arquivos de dentro.
+const pendentesDaParada = new Set(Array.isArray(retomar?.arquivosPendentes) ? retomar.arquivosPendentes : [])
 const sujeiraInicial = [...new Set([
   ...(Array.isArray(retomar?.sujeiraInicial) ? retomar.sujeiraInicial.filter(a => typeof a === 'string') : []),
-  ...caminhosPendentes(preparo).filter(a => !pendentesDaParada.includes(a)),
+  ...caminhosPendentes(preparo).filter(a => !naLista(pendentesDaParada, a)),
 ])]
 // Sujeira alheia já vista: linha de base, mais o que sobra na árvore fora da lista depois de cada commit e a cada
 // conferência. Mudança nova fora disso e fora da lista do worker volta para ele antes do commit.
@@ -577,7 +578,7 @@ function normalizar(a) {
   return c.toLowerCase().startsWith(raiz.toLowerCase() + '/') ? c.slice(raiz.length + 1) : c
 }
 // Pasta nova aparece no `git status` como `novo/`: declarada assim, cobre os arquivos de dentro.
-const naLista = (arquivos, a) => arquivos.has(a) || [...arquivos].some(p => p.endsWith('/') && a.startsWith(p))
+function naLista(arquivos, a) { return arquivos.has(a) || [...arquivos].some(p => p.endsWith('/') && a.startsWith(p)) }
 
 function promptTrabalho(f, extra) {
   return montar(f.etapa ?? 'implementar',

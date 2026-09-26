@@ -23,7 +23,8 @@ if (!base || (modo && (modo !== '--resumo' || !baseMilestone))) {
 const completo = ref => git('rev-parse', '--verify', `${ref}^{commit}`).trim()
 const inicio = completo(base)
 const intervalo = `${inicio}..HEAD`
-const pendencias = linhas(git('status', '--porcelain'))
+// -uall: pasta nova aparece arquivo por arquivo, e não como `?? pasta/`.
+const pendencias = linhas(git('status', '--porcelain', '-uall'))
 const commits = linhas(git('rev-list', '--reverse', intervalo))
 const arquivosDe = sha => linhas(git('diff-tree', '--no-commit-id', '--name-only', '-r', '--root', '-m', '--first-parent', sha))
 const estado = {
