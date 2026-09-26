@@ -151,8 +151,9 @@ node instalar.mjs --global      # grava ou atualiza as skills
 node instalar.mjs --verificar   # sai com código 1 se estiverem desatualizadas
 ```
 
-Isso grava `missao-traycer`, `criar-spec-simples` e `enxugar-codigo` em `~/.claude/skills/` e
-`~/.codex/skills/`, substituindo cópias antigas. Na hora de instalar, o caminho deste repositório e a URL do
+Isso grava `criar-spec-simples` e `enxugar-codigo` em `~/.claude/skills/` e `~/.codex/skills/`, substituindo
+cópias antigas. A `missao-traycer` não é instalada no global: o `--global` remove a cópia global dela que tiver
+a marca do instalador. Na hora de instalar, o caminho deste repositório e a URL do
 `origin` entram no texto de cada skill, com uma seção "Atualizar a missão" que ensina a pegar atualização.
 Nada da máquina fica versionado aqui. Projeto não guarda cópia das skills.
 
@@ -252,7 +253,8 @@ O título `Suíte final` é reservado. Se a missão parar na suíte final, a ret
 
 ## No Traycer: skill `missao-traycer`
 
-A skill `missao-traycer` fica no global (veja [Instalar](#instalar)). Ela lê as técnicas das etapas e o
+A skill `missao-traycer` fica só neste repositório, em `skills/missao-traycer/`: não é instalada no global nem no
+projeto. Para usar, aponte o agente do Traycer para esse arquivo. Ela lê as técnicas das etapas e o
 `git-estado.mjs` deste repositório, e a configuração do projeto atual; se o projeto não tiver a missão instalada,
 ela manda instalar. Segue o mesmo fluxo e as mesmas garantias, mas usa agentes e artefatos do Traycer em vez do
 Workflow:
