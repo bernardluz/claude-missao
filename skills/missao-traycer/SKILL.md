@@ -39,8 +39,11 @@ O plano vem do usuário, de um artefato do epic ou de `args`:
 são as áreas de caça-bug do milestone; `userTesting`, a jornada que um usuário percorre.
 
 Também pode vir só a `spec` (caminho ou texto). Nesse caso, antes de tudo:
-1. **Simplicidade.** Um filho só-leitura compara a SPEC com o código e devolve perguntas e cortes sugeridos.
-   Havendo qualquer um, pare e mostre tudo junto ao usuário, sem escrever código.
+1. **Simplicidade.** Um filho só-leitura compara a SPEC com o código e devolve perguntas e cortes, cada um com
+   sugestão e classe. Decidido (técnico ou de desenho interno, com sugestão): siga com a sugestão, grave-a em
+   `estado/` como decisão assumida e mostre-a ao usuário no fim. Bloqueante (produto ou risco sem resposta na SPEC
+   nem no código; na dúvida, o que toca dinheiro, acesso ou dado sensível): pare e mostre todos juntos, sem
+   escrever código.
 2. **Planejar.** Aprovada, um filho só-leitura gera o plano no formato acima. Grave-o em `estado/`: a retomada não
    replaneja.
 
