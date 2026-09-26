@@ -28,3 +28,7 @@ Base: `docs/codex-executor.spec.md`. Branch isolada: `codex/executor-missao`.
 ## 5. Registro
 - `docs/codex-executor.summary.md`: comandos, RED/GREEN, cobertura, reviews, limites e pendências em commit separado por este plano.
 - Sem instalar global nem alterar checkout principal antes de validar e explicitar o que já está disponível.
+
+## Ajustes do review de contrato
+- Limitar processos em `agent()`, nunca callbacks `parallel()` (o núcleo tem paralelismo aninhado).
+- Drenar todas as chamadas iniciadas antes de fechar a execução. Cancelamento, timeout ou saída anormal do subprocesso conservam o lock do checkout para inspeção; nunca liberar enquanto pode haver escrita residual.
