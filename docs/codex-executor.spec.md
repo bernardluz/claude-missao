@@ -17,7 +17,7 @@ Executar o workflow JavaScript `missao` pelo Codex CLI, mantendo o núcleo compa
 - Papéis do projeto são lidos de `.codex/agents` ou, por compatibilidade, `.claude/agents`; papel configurado ausente é erro, nunca removido silenciosamente.
 - Resultado JSON fora do contrato, recusa, timeout ou falha do CLI param a execução. Não tratar erro como aprovação ou sucesso.
 - Registros por execução, sem sobrescrever outra execução; trava por checkout; gravação do resultado antes de declarar conclusão.
-- Modelo do CLI configurado pelo usuário, ou opção explícita. Nomes Claude como `haiku` não são enviados como modelos Codex; a diferença fica documentada.
+- Antes de iniciar ou retomar, perguntar ao usuário qual modelo quer usar e aguardar a resposta. Modelo explícito obrigatório, sem herdar configuração do CLI, modelo antigo ou hints Claude como `haiku`. Uma escolha por execução, usada por todos os agentes; se falhar, parar sem trocar de modelo.
 
 ## Limites desta primeira entrega
 Não criar painel nativo, serviço em background, agendamento, PR/push, deploy, migração ou missão produtiva. Não instalar global antes da validação. Uma interrupção abrupta conserva logs, mas não autoriza repetir commits nem fabricar um `retomar`; a recuperação exige inspeção. Testes de subprocesso usarão um CLI falso apenas na fronteira do modelo, sem alegar E2E de uma missão real.
