@@ -346,6 +346,11 @@ if (retomar && (!planoDado || ![...planoDado, SUITE].some(m => m.titulo === reto
 
 // Decisões que a missão assumiu pela sugestão da verificação de simplicidade, para o usuário revisar no fim.
 const decisoesAssumidas = Array.isArray(args?.retomar?.decisoesAssumidas) ? args.retomar.decisoesAssumidas.filter(d => typeof d === 'string') : []
+// Features que saíram sem commit como já resolvidas no código e ainda sem evidência do scrutiny ({ titulo, spec,
+// milestone }). Atravessa a retomada; a feature sai da lista quando a evidência chega.
+const semEvidencia = Array.isArray(args?.retomar?.semEvidencia)
+  ? args.retomar.semEvidencia.filter(x => x && typeof x.titulo === 'string' && typeof x.spec === 'string' && typeof x.milestone === 'string')
+  : []
 
 // Contexto da missão: áreas do plano (hidratação, gerada uma vez) e aprendizados dos workers. Volta no retomar.
 const contexto = { areas: [], aprendizados: [] }
@@ -849,6 +854,9 @@ async function implementar(features, fase) {
         if (fase !== 'Corrigir') {
           const decisao = `já resolvida no código (${f.titulo}): ${r.resumo ?? 'sem mudança'}`
           if (!decisoesAssumidas.includes(decisao)) decisoesAssumidas.push(decisao)
+          if (!semEvidencia.some(x => x.titulo === f.titulo && x.milestone === f.milestone)) {
+            semEvidencia.push({ titulo: f.titulo, spec: f.spec, milestone: f.milestone })
+          }
           log(`${f.titulo}: já resolvida no código, concluída sem commit`)
         }
         continue
@@ -1105,12 +1113,17 @@ async function validar(m, base, arquivos, anteriores, jaResolvidas = []) {
   ])
   if (!revisao || !testes) return { erro: 'um validador não respondeu' }
   const provadas = new Set((testes.evidencias ?? []).filter(e => String(e.evidencia ?? '').trim()).map(e => e.feature))
-  const semEvidencia = jaResolvidas.filter(f => !provadas.has(f.titulo)).map(f => ({
+  // A feature provada sai da lista que atravessa a retomada.
+  for (const f of jaResolvidas.filter(f => provadas.has(f.titulo))) {
+    const i = semEvidencia.findIndex(x => x.titulo === f.titulo && x.milestone === f.milestone)
+    if (i >= 0) semEvidencia.splice(i, 1)
+  }
+  const naoProvadas = jaResolvidas.filter(f => !provadas.has(f.titulo)).map(f => ({
     problema: `a feature "${f.titulo}" saiu como já resolvida no código, sem evidência (teste ou arquivo:linha) de que ` +
       `cumpre a spec: ${f.spec}. Entregue o que falta, ou o teste que a comprova`,
   }))
-  const problemas = [...revisao.problemas, ...testes.problemas, ...semEvidencia]
-  const aprovado = revisao.aprovado && testes.aprovado && !semEvidencia.length
+  const problemas = [...revisao.problemas, ...testes.problemas, ...naoProvadas]
+  const aprovado = revisao.aprovado && testes.aprovado && !naoProvadas.length
   if (!aprovado && problemas.length === 0) return { erro: 'validação reprovou sem apontar problemas' }
   return { aprovado, problemas }
 }
@@ -1388,7 +1401,7 @@ function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   return {
     parouEm: m.titulo, ...extra, decisoesAssumidas: [...decisoesAssumidas], deForaTocando: [...deForaTocando], sujeiraCommitada: [...sujeiraCommitada], plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
     sugestaoAprendizados: sugestaoAprendizados(),
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs }, decisoesAssumidas: [...decisoesAssumidas], sujeiraInicial: [...sujeiraInicial], sujeiraCommitada: [...sujeiraCommitada], arquivosPendentes: extra.arquivosPendentes ?? [] },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs }, decisoesAssumidas: [...decisoesAssumidas], semEvidencia: semEvidencia.map(x => ({ ...x })), sujeiraInicial: [...sujeiraInicial], sujeiraCommitada: [...sujeiraCommitada], arquivosPendentes: extra.arquivosPendentes ?? [] },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1501,7 +1514,7 @@ for (const [i, m] of pendentes.entries()) {
     }
   }
   // Scrutiny validator (a antiga validação): testes, lint, typecheck e revisão contra o critério, com correções.
-  const jaResolvidas = () => features.filter(f => feitas.some(x => x.feature === f.titulo && x.jaResolvido && x.semCommit))
+  const jaResolvidas = () => semEvidencia.filter(x => x.milestone === m.titulo)
   const scrutiny = () => ateFechar(anteriores => validar(m, base, conf.arquivos, anteriores, jaResolvidas()))
 
   if (!m.suite && aFazer.length) {

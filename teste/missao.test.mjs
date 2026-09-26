@@ -90,6 +90,22 @@ describe('fluxo principal', () => {
     assert.doesNotMatch(r.prompt('testes: M1'), /Estas features saíram sem commit/)
   })
 
+  test('já resolvida sem evidência atravessa a retomada e sai da lista quando a evidência chega', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { jaResolvidoFeature: { F1: true }, validacao: [2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'M1')
+    assert.deepEqual(p1.resultado.retomar.semEvidencia, [{ titulo: 'F1', spec: 's', milestone: 'M1' }])
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), { evidencias: [[{ feature: 'F1', evidencia: 'teste/f1.test.mjs:10' }]] }, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('F1'), 0)
+    assert.match(p2.prompt('testes: M1'), /Estas features saíram sem commit, como já resolvidas no código\. .*\n- F1: s/)
+
+    const provada = await rodar(plano(), { jaResolvidoFeature: { F1: true }, validacao: [2, 2], evidencias: [[{ feature: 'F1', evidencia: 'teste/f1.test.mjs:10' }]] },
+      { git: ['base0000'], sujo: false })
+    assert.equal(provada.resultado.parouEm, 'M1')
+    assert.deepEqual(provada.resultado.retomar.semEvidencia, [])
+  })
+
   test('worker sem arquivos declarados para logo', async () => {
     const r = await rodar(plano(), { semArquivos: true })
     assert.match(r.resultado.motivo, /não declarou arquivos/)
