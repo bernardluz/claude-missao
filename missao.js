@@ -31,8 +31,8 @@ export const meta = {
 // Etapas: [simplicidade e plano, só com spec] → pré-voo → contexto do plano → por milestone: prova de contrato,
 // features (implementa → revisão independente → commit atômico conferido), scrutiny ⇄ correções, caça bug ⇄ correções,
 // user testing ⇄ correções → caça final entre milestones → suíte completa ⇄ correções → aceite.
-// O git é lido pelo script git-estado.mjs, nunca pela interpretação de um modelo. Commit de outra sessão que não
-// impacta a missão é aceito; o que impacta para a missão ali.
+// O git é lido pelo script git-estado.mjs, nunca pela interpretação de um modelo. Commit de outra sessão nunca para a
+// missão: é aceito; o que toca arquivo dela volta ao scrutiny e à caça, e o que levou o diff da feature a conclui.
 // Correções seguem enquanto a avaliação aponta menos problemas que na rodada anterior; o teto só evita loop infinito.
 // Prompt de etapa = técnica da etapa (etapas/<etapa>.md, embutida na instalação) + contexto do plano + aprendizados.
 // O contexto do plano é gerado uma vez por missão e volta no retomar; os aprendizados dos workers se acumulam nele.
@@ -69,8 +69,6 @@ const PADRAO = {
   preVoo: null,
   // Modelo do agente que só roda o script de estado do git e devolve a saída literal.
   modeloConferencia: 'haiku',
-  // Modelo do agente que decide se um commit de fora da missão a impacta.
-  modeloCommitDeFora: 'sonnet',
 }
 // @config-inicio (substituído por instalar.mjs)
 const CONFIG_PROJETO = {}
@@ -98,7 +96,7 @@ const CONFIG = { ...PADRAO, ...CONFIG_PROJETO, ...(args?.config ?? {}) }
   const texto = v => v === null || typeof v === 'string'
   const erros = Object.keys(CONFIG).filter(k => !(k in PADRAO)).map(k => `chave desconhecida: ${k}`)
   for (const k of ['regrasTestes', 'regrasProjeto', 'revisor', 'leitor', 'suiteCompleta', 'preVoo']) if (!texto(CONFIG[k])) erros.push(`${k} deve ser texto ou null`)
-  for (const k of ['formatoCommit', 'idioma', 'exemplosSkills', 'modeloConferencia', 'modeloCommitDeFora']) if (typeof CONFIG[k] !== 'string') erros.push(`${k} deve ser texto`)
+  for (const k of ['formatoCommit', 'idioma', 'exemplosSkills', 'modeloConferencia']) if (typeof CONFIG[k] !== 'string') erros.push(`${k} deve ser texto`)
   if (!Array.isArray(CONFIG.revisoresPorPasta) || !CONFIG.revisoresPorPasta.every(r => r && typeof r.prefixo === 'string' && typeof r.agentType === 'string')) {
     erros.push('revisoresPorPasta deve ser lista de { prefixo, agentType }')
   }
@@ -491,8 +489,13 @@ const estimativa = 2 + (retomar ? 1 : 0) + (contexto.areas.length || !planoTexto
 log(`Estimativa mínima: ${estimativa} agentes a partir daqui (sem contar correções e retentativas)`)
 
 const relatorio = []
-// Commits de fora aceitos (não impactam a missão), levados no retomar: não contam como da missão.
+// Commits de fora (de outra sessão ou automação), sempre aceitos e levados no retomar: não contam como da missão.
 const deForaAceitos = Array.isArray(args.retomar?.deFora) ? args.retomar.deFora.filter(s => typeof s === 'string') : []
+// Os que tocam arquivo da missão, por milestone ({ milestone, commits, arquivos }): voltam ao scrutiny e à caça do
+// milestone, à caça final e à suíte, e saem no relatório final.
+const deForaTocando = Array.isArray(retomar?.deForaTocando)
+  ? retomar.deForaTocando.filter(d => d && typeof d.milestone === 'string' && Array.isArray(d.commits) && Array.isArray(d.arquivos))
+  : []
 // Critérios de aceite com a evidência de cada um, preenchidos ao fim.
 let aceite = null
 // Modo enxugar: medição do alvo no início (pré-voo, preservada na retomada) e no fim (aceite).
@@ -662,8 +665,10 @@ async function commitar(f, arquivos, fase, antes) {
       'declare-as em arquivos; se não, desfaça só elas' }
   }
   if (soDump(r)) return { erro: `o agente de commit não apagou o dump de crash do bash (${r.foraDaLista.join(', ')}); apague-o à mão` }
-  // Sem commit e sem causa conhecida: um commit de fora da missão (ex.: `git commit -a`) pode ter levado o diff.
+  // Sem commit e sem causa conhecida: um commit de fora da missão (ex.: `git commit -a`) pode ter levado o diff. Se
+  // os arquivos da feature estão nesses commits e nenhum ficou pendente na árvore, a feature foi entregue por ele.
   const c = await lerGit(antes, fase)
+  if (c?.commits.length && c.branch === preparo.branch && levouODiff(c, arquivos)) return { levadoPorFora: c }
   if (c?.commits.length) {
     return { semDiff: arvoreLimpa(c), erro: `o agente de commit não commitou (${r.motivo ?? 'sem motivo'}), e ${antes}..HEAD tem ` +
       `commit de fora da missão: ${c.commits.join(', ')}, que pode ter levado o diff da feature. ${comoAceitar(c.head)}. ` +
@@ -682,36 +687,29 @@ function commitsDeFora(c, esperados) {
 const arquivosDaMissao = new Set()
 let arquivosDoMilestone = new Set()
 
-const DE_FORA = {
-  type: 'object',
-  properties: { impacta: { type: 'boolean' }, motivo: { type: 'string' } },
-  required: ['impacta', 'motivo'],
+// Commit de outra sessão ou automação nunca para a missão: é aceito e não conta como dela. Se toca arquivo da
+// missão, fica registrado em deForaTocando para o scrutiny e a caça revisarem esses arquivos. emCurso: arquivos da
+// feature ainda não conferida.
+function aceitarCommitsDeFora(c, deFora, milestone, emCurso = []) {
+  const daMissao = new Set([...arquivosDaMissao, ...arquivosDoMilestone, ...emCurso])
+  const tocados = [...new Set(deFora.flatMap(s => (c.arquivosPorCommit?.[s] ?? []).map(normalizar)).filter(a => naLista(daMissao, a)))]
+  deForaAceitos.push(...deFora)
+  if (!tocados.length) return log(`commit de fora aceito, não toca a missão: ${deFora.join(', ')}`)
+  deForaTocando.push({ milestone, commits: [...deFora], arquivos: tocados })
+  log(`commit de fora aceito, toca a missão: ${deFora.join(', ')}. O commit de fora toca arquivo da missão: ${tocados.join(', ')}`)
 }
-// Commit de outra sessão ou automação não para a missão se não a impacta: tocar arquivo dela para na hora; o resto,
-// um agente barato julga pelo que o commit muda. emCurso: arquivos da feature ainda não conferida.
-async function julgarDeFora(c, deFora, fase, emCurso = []) {
-  const doMilestone = [...new Set([...arquivosDoMilestone, ...emCurso])]
-  const daMissao = new Set([...arquivosDaMissao, ...doMilestone])
-  const arquivosDe = s => (c.arquivosPorCommit?.[s] ?? []).map(normalizar)
-  const tocados = deFora.flatMap(arquivosDe).filter(a => naLista(daMissao, a))
-  if (tocados.length) return { impacta: true, motivo: `O commit de fora toca arquivo da missão: ${[...new Set(tocados)].join(', ')}` }
-  const r = await comRetentativa('commit de fora', () => agent(
-    'Apareceram na branch commits que não são desta missão:\n' +
-    deFora.map(s => `- ${s}: ${arquivosDe(s).join(', ') || 'arquivos não informados'}`).join('\n') +
-    '\nVeja mensagem, arquivos e diffstat de cada um com `git show --stat <sha>`.\n' +
-    `Arquivos da missão: ${[...arquivosDaMissao].join(', ') || 'nenhum ainda'}.\n` +
-    `Arquivos do milestone atual: ${doMilestone.join(', ') || 'nenhum ainda'}.\n` +
-    'Devolva impacta=true se algum desses commits toca arquivo da missão ou algo de que ela depende (build, ' +
-    'dependências, migrations do mesmo módulo, contrato que ela usa); senão impacta=false. Explique em motivo, numa ' +
-    'frase. Somente leitura.\n' + GIT_PROIBIDO,
-    { label: 'commit de fora', phase: fase, schema: DE_FORA, model: CONFIG.modeloCommitDeFora, effort: 'low' },
-  ))
-  if (!r) return { impacta: true, motivo: 'O agente que julga commit de fora não respondeu' }
-  if (!r.impacta) {
-    deForaAceitos.push(...deFora)
-    log(`commit de fora aceito, não impacta a missão: ${deFora.join(', ')}. ${r.motivo}`)
-  }
-  return r
+// O diff da feature foi num commit de fora: algum arquivo dela está nos commits do intervalo e nenhum ficou pendente.
+function levouODiff(c, arquivos) {
+  const nosCommits = new Set(c.commits.flatMap(s => (c.arquivosPorCommit?.[s] ?? []).map(normalizar)))
+  const pendentes = (c.pendencias ?? []).map(l => /^\S{1,2}\s+"?(.+?)"?$/.exec(l.trim())?.[1]).filter(Boolean).map(normalizar)
+  return [...arquivos].some(a => nosCommits.has(a)) && !pendentes.some(a => naLista(arquivos, a))
+}
+// Arquivos da missão tocados por commit de fora, para quem revisa. milestone null: todos (caça final e suíte).
+function reviseDeFora(milestone = null) {
+  const d = deForaTocando.filter(x => milestone === null || x.milestone === milestone)
+  if (!d.length) return ''
+  return ` Arquivos da missão tocados por commit de fora: ${d.map(x => `${x.arquivos.join(', ')} (${x.commits.join(', ')})`).join('; ')}. ` +
+    'Revise-os: outra sessão mexeu neles no meio da missão.'
 }
 
 // A missão não decide pelo usuário se fica um commit que ela não revisou: diz como aceitá-lo na retomada.
@@ -733,13 +731,8 @@ async function conferirCommit(f, commit, antes, arquivos, fase) {
       `${c.commits.join(', ') || 'nenhum commit'}; confira o git e ajuste retomar à mão` }
   }
   const deFora = commitsDeFora(c, [commit])
-  if (deFora.length) {
-    const d = await julgarDeFora(c, deFora, fase, [...arquivos])
-    if (d.impacta) {
-      return { motivo: `commit de fora da missão logo depois da feature "${f.titulo}": ${deFora.join(', ')}. Em ${antes}..HEAD ` +
-        `só devia estar ${commit}, o commit da feature, que já entrou em retomar. ${comoAceitar(c.head)}. ${d.motivo}` }
-    }
-  } else if (!mesmoSha(c.head, commit)) return { motivo: `HEAD real ${c.head} difere do commit declarado ${commit}` }
+  if (deFora.length) aceitarCommitsDeFora(c, deFora, f.milestone, [...arquivos])
+  else if (!mesmoSha(c.head, commit)) return { motivo: `HEAD real ${c.head} difere do commit declarado ${commit}` }
   // Com commit de fora aceito no intervalo, só os arquivos do commit da feature contam.
   const doCommit = deFora.length ? c.arquivosPorCommit?.[c.commits.find(s => mesmoSha(s, commit))] ?? c.arquivos : c.arquivos
   const alheios = doCommit.map(normalizar).filter(a => !naLista(arquivos, a))
@@ -806,6 +799,7 @@ async function implementar(features, fase) {
     let rodada = 0
     let commit = null
     let pararDepois = null
+    let levado = null
     while (!commit) {
       const memoria = anteriores.length
         ? `\nNa rodada anterior foram apontados: ${anteriores.join(' | ')}. Confirme se foram resolvidos.`
@@ -829,6 +823,7 @@ async function implementar(features, fase) {
       let problemas
       if (rev.aprovado) {
         const c = await commitar(f, arquivos, fase, antes)
+        if (c.levadoPorFora) { levado = c.levadoPorFora; break }
         if (c.commit) { commit = c.commit; pararDepois = c.parar; break }
         if (c.erro) return falhou(c.semDiff ? c.erro : c.erro + '.' + sujo)
         problemas = [c.apontamento]
@@ -854,7 +849,17 @@ async function implementar(features, fase) {
       anteriores = problemas
     }
 
-    // Commit de outra sessão no meio da missão para aqui, antes da próxima feature, e não só no fim do milestone.
+    if (levado) {
+      // Outra sessão commitou o diff da feature: ela está entregue, e os commits de fora entram como esperados.
+      log(`commit de fora levou o diff da feature "${f.titulo}": ${levado.commits.join(', ')}; feature contada como concluída`)
+      aceitarCommitsDeFora(levado, levado.commits, f.milestone, [...arquivos])
+      head = levado.head
+      commits.push(...levado.commits)
+      for (const a of arquivos) { arquivosDaMissao.add(a); arquivosDoMilestone.add(a) }
+      resultados.push({ feature: f.titulo, ...r, levadoPorFora: levado.commits, rodadasRevisao: rodada })
+      continue
+    }
+    // Commit de outra sessão no meio da missão é aceito aqui, antes da próxima feature, e não só no fim do milestone.
     const pos = await conferirCommit(f, commit, antes, arquivos, fase)
     if (!pos.naoAdotar) {
       // Conferido, o intervalo pode trazer também commits de fora aceitos, na ordem real.
@@ -914,14 +919,13 @@ function lerGit(base, fase, label = 'conferência', resumo = '') {
 }
 
 // Confere que o intervalo tem exatamente os commits declarados.
-async function conferir(base, esperados, fase = 'Scrutiny') {
+async function conferir(base, esperados, milestone, fase = 'Scrutiny') {
   const c = await lerGit(base, fase)
   if (!c) return { ok: false, semLeitura: true, motivo: `conferência não retornou${causaGit()}` }
   if (c.branch !== preparo.branch) return { ok: false, motivo: `branch mudou para "${c.branch}"` }
   const deFora = commitsDeFora(c, esperados)
   if (deFora.length) {
-    const d = await julgarDeFora(c, deFora, fase)
-    if (d.impacta) return { ok: false, motivo: `commit de fora da missão em ${base}..HEAD: ${deFora.join(', ')}. ${comoAceitar(c.head)}. ${d.motivo}` }
+    aceitarCommitsDeFora(c, deFora, milestone)
     // Aceito: passa a ser esperado no milestone (a lista do chamador é atualizada aqui) e o HEAD anda até ele.
     esperados.splice(0, esperados.length, ...c.commits)
     head = c.head
@@ -968,6 +972,7 @@ async function validarSuite(anteriores) {
       ? `\nOs commits ${deForaAceitos.join(', ')} são de fora da missão: não peça correção do código deles. Falha que ` +
         'venha só deles, descreva-a dizendo que é de fora da missão, para decisão humana.'
       : '') +
+    reviseDeFora() +
     '\n' + GIT_PROIBIDO, contexto.areas),
     { label: 'suíte completa', phase: 'Suíte final', schema: VALIDACAO },
   ))
@@ -992,14 +997,14 @@ async function validar(m, base, arquivos, anteriores) {
     : ''
   const [revisao, testes] = await parallel([
     () => comRetentativa(`revisão: ${m.titulo}`, () => trabalhar(montar('scrutiny',
-      `Revise os commits ${intervalo} do milestone "${m.titulo}" (critério: ${m.criterio}).${semDeFora()} ` +
+      `Revise os commits ${intervalo} do milestone "${m.titulo}" (critério: ${m.criterio}).${semDeFora()}${reviseDeFora(m.titulo)} ` +
       'Aponte só problemas bloqueantes de correção, segurança, contrato ou atomicidade dos commits.' + memoria +
       '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
       { label: `revisão: ${m.titulo}`, phase: 'Scrutiny', agentType: revisorPara(arquivos.map(normalizar)), schema: VALIDACAO },
     )),
     () => comRetentativa(`testes: ${m.titulo}`, () => trabalhar(montar('scrutiny',
       `Rode, no HEAD atual, os testes focados que cobrem os commits ${intervalo} do milestone "${m.titulo}"${semDeFora()} ` +
-      `e confira o critério: ${m.criterio}. Não altere código. Reporte falhas com a saída relevante.` + memoria +
+      `e confira o critério: ${m.criterio}.${reviseDeFora(m.titulo)} Não altere código. Reporte falhas com a saída relevante.` + memoria +
       '\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
       { label: `testes: ${m.titulo}`, phase: 'Scrutiny', schema: VALIDACAO },
     )),
@@ -1245,9 +1250,9 @@ function guiasDe(m) {
 function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
-    parouEm: m.titulo, ...extra, plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
+    parouEm: m.titulo, ...extra, deForaTocando: [...deForaTocando], plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
     sugestaoAprendizados: sugestaoAprendizados(),
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs } },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs } },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1322,7 +1327,7 @@ for (const [i, m] of pendentes.entries()) {
     feitas.push(...fix.resultados)
     commits.push(...fix.commits)
     if (fix.falhou) return fix.falhou
-    conf = await conferir(base, commits)
+    conf = await conferir(base, commits, m.titulo)
     return conf.ok ? null : { motivo: conf.motivo }
   }
 
@@ -1357,7 +1362,7 @@ for (const [i, m] of pendentes.entries()) {
   commits.push(...impl.commits)
   if (impl.falhou) return pararAqui(impl.falhou)
 
-  conf = await conferir(base, commits)
+  conf = await conferir(base, commits, m.titulo)
   if (!conf.ok) return pararAqui({ motivo: conf.motivo })
   let e = null
 
@@ -1366,7 +1371,7 @@ for (const [i, m] of pendentes.entries()) {
   if (m.suite && !cacaFinalFeita && milestones.length > 1) {
     const c = await cacar('final, rodada 1', ['interação entre milestones'], `${INICIO_MISSAO}..${head}`,
       `Foque na interação entre os milestones da missão (${milestones.map(x => x.titulo).join(', ')}): contratos entre ` +
-      `eles, dados que um grava e outro lê, ordem de execução.${semDeFora()}`, bugsCorrigidos, contexto.areas)
+      `eles, dados que um grava e outro lê, ordem de execução.${semDeFora()}${reviseDeFora()}`, bugsCorrigidos, contexto.areas)
     if (c.erro) return pararAqui({ motivo: c.erro })
     const repetidos = c.confirmados.filter(a => a.repete)
     if (repetidos.length) {
@@ -1388,7 +1393,7 @@ for (const [i, m] of pendentes.entries()) {
     const areas = m.caca ?? await areasDeCaca(m, conf.arquivos)
     for (let r = 1; ; r++) {
       const c = await cacar(`${m.titulo}, rodada ${r}`, areas, `${base}..${head}`,
-        `Milestone "${m.titulo}", critério: ${m.criterio}.${semDeFora()}`, bugsCorrigidos, guiasDoMilestone)
+        `Milestone "${m.titulo}", critério: ${m.criterio}.${semDeFora()}${reviseDeFora(m.titulo)}`, bugsCorrigidos, guiasDoMilestone)
       if (c.erro) return pararAqui({ motivo: c.erro })
       if (!c.confirmados.length) break
       const repetidos = c.confirmados.filter(a => a.repete)
@@ -1434,11 +1439,11 @@ for (const [i, m] of pendentes.entries()) {
   }
 
   // Os validadores rodam depois da última conferência: confirma que não sujaram a árvore nem commitaram.
-  conf = await conferir(base, commits)
+  conf = await conferir(base, commits, m.titulo)
   if (!conf.ok) return pararAqui({ motivo: `após validação: ${conf.motivo}` })
 
   relatorio.push({ milestone: m.titulo, aprovado: true, rodadasCorrecao: rodada, commits: `${base}..${head}`, features: feitas })
 }
 
 const enxugar = MODO === 'enxugar' ? { modo: MODO, medicao: { antes: medicaoAntes, depois: medicaoDepois, ...(antesParcial ? { antesParcial: true } : {}) } } : {}
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, ...enxugar, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, deForaTocando, ...enxugar, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
