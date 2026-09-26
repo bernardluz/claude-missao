@@ -1117,21 +1117,25 @@ const AREAS_CACA = { type: 'object', properties: { areas: { type: 'array', items
 
 // Antes de implementar: as premissas das features sobre o que o milestone não controla, conferidas no código do dono.
 // Premissa que não confere e é só fato descritivo de código que já existe (decidido, com o valor real e a feature)
-// corrige a spec dessa feature, vira decisão assumida e a missão segue. Escolha para código novo, decisão explícita do
-// plano ou da SPEC e divergência de comportamento, contrato ou risco param a missão com todas as perguntas juntas.
+// corrige a spec dessa feature, vira decisão assumida e a missão segue. Decisão do plano ou da SPEC não é premissa: a
+// missão a segue. Escolha nova que o plano não fixou, conflito concreto com decisão do plano e divergência de
+// comportamento, contrato ou risco param a missão com todas as perguntas juntas.
 async function provarContrato(m, aFazer) {
   const r = await comRetentativa(`contrato: ${m.titulo}`, () => trabalhar(montar('prova-de-contrato',
     // O provador enxerga o plano do milestone e a SPEC, onde ficam as decisões explícitas que ele não pode trocar.
     `Plano do milestone "${m.titulo}" (critério: ${m.criterio}${m.ui ? `; telas: ${m.ui}` : ''}). Features a implementar:\n` +
     aFazer.map(f => `- ${f.titulo}: ${f.spec}`).join('\n') + '\n\n' +
     (SPEC ? `${SPEC_NO_PROMPT()}\n\n` : '') +
+    'O que o plano ou a SPEC marca como decisão ("Decisão", "confirmado", "Decisões já fechadas") não é premissa a ' +
+    'provar: a missão segue a decisão. Ela só entra na lista, como bloqueante, com conflito concreto no código (ex.: já ' +
+    'existe arquivo com o mesmo número de migration).\n' +
     'Liste as premissas que essas features fazem sobre outros serviços, módulos ou libs (rotas, campos, ids, ' +
     'comportamento) e confira cada uma no código do dono. Devolva cada premissa com a evidência (arquivo e linha), ' +
     'confere=true ou false. Premissa que não confere leva classe, feature (o título exato da feature afetada) e:\n' +
     '- decidido: só fato descritivo de código que JÁ existe no dono, sem mudar comportamento nem contrato (contagem ' +
     'de chamadas, caminho, nome atual de símbolo ou campo existente); devolva o valor real em valorReal;\n' +
-    '- bloqueante: escolha para código novo (número de migration, nome de tabela ou rota nova, contrato novo), o que ' +
-    'o plano ou a SPEC marca como decisão ("Decisão", "confirmado", "Decisões já fechadas"), divergência que muda ' +
+    '- bloqueante: escolha para código novo (número de migration, nome de tabela ou rota nova, contrato novo) que o ' +
+    'plano não fixou, conflito concreto no código com uma decisão do plano ou da SPEC, divergência que muda ' +
     'comportamento ou contrato, ou que envolve dinheiro, acesso ou dado sensível sem resposta no código; devolva a ' +
     'pergunta objetiva para o usuário. Na dúvida, bloqueante.\n' +
     'Sem premissa externa, devolva a lista vazia. Não escreva arquivos nem rode build: só leitura.\n' + GIT_PROIBIDO, guiasDe(m)),
@@ -1140,7 +1144,11 @@ async function provarContrato(m, aFazer) {
   if (!r) return { motivo: 'o agente da prova de contrato não respondeu' }
   const naoConferem = r.premissas.filter(p => !p.confere)
   // Só é decidida a premissa com valor real e feature certa; migration nunca é, porque o número é escolha do plano.
-  const ehMigration = p => /\bV\d+\b|migra/i.test(`${p.premissa} ${p.valorReal ?? ''}`)
+  // Ancorada em migration de verdade: arquivo Flyway (V71__x.sql, V maiúsculo) ou a palavra migration/Flyway.
+  const ehMigration = p => {
+    const t = `${p.premissa} ${p.valorReal ?? ''}`
+    return /\bV\d+__/.test(t) || /\bmigrations?\b|\bflyway\b/i.test(t)
+  }
   const decididas = naoConferem.filter(p => p.classe === 'decidido' && String(p.valorReal ?? '').trim() &&
     aFazer.some(f => f.titulo === p.feature) && !ehMigration(p))
   const falsas = naoConferem.filter(p => !decididas.includes(p))

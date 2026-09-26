@@ -1437,7 +1437,7 @@ describe('prova de contrato decide o trivial', () => {
     assert.match(p, /Plano do milestone "M1" \(critério: c\)\. Features a implementar:\n- F1: s\n- F2: Decisão confirmada: V71/)
     assert.match(p, /SPEC \(texto, ou caminho de arquivo no repositório para ler inteiro\):\ndocs\/spec\.md/)
     assert.match(p, /decidido: só fato descritivo de código que JÁ existe no dono/)
-    assert.match(p, /bloqueante: escolha para código novo \(número de migration, nome de tabela ou rota nova, contrato novo\), o que o plano ou a SPEC marca como decisão/)
+    assert.match(p, /bloqueante: escolha para código novo \(número de migration, nome de tabela ou rota nova, contrato novo\) que o plano não fixou, conflito concreto no código com uma decisão do plano ou da SPEC/)
     assert.doesNotMatch(p, /próxima versão livre de migration/)
   })
 
@@ -1454,5 +1454,36 @@ describe('prova de contrato decide o trivial', () => {
     assert.deepEqual(r.resultado.perguntas, ['V71 ou V70?', 'o saldo vem de onde?', 'confirmar: campo idConta', 'confirmar: 3 telas'])
     assert.deepEqual(r.resultado.decisoesAssumidas, [])
     assert.equal(r.contar('F1'), 0)
+  })
+
+  test('trava de migration: arquivo Flyway e a palavra migration param; rota /v2 e migração de tela não', async () => {
+    const param = { M1: [
+      { premissa: 'arquivo V71__x.sql', confere: false, classe: 'decidido', valorReal: 'V70__x.sql', feature: 'F1', pergunta: 'arquivo?' },
+      { premissa: 'migration V71', confere: false, classe: 'decidido', valorReal: 'V70', feature: 'F1', pergunta: 'número?' },
+    ] }
+    const r1 = await rodar(comUmMilestone(), { contratoFalso: param })
+    assert.equal(r1.resultado.parouEm, 'M1')
+    assert.deepEqual(r1.resultado.perguntas, ['arquivo?', 'número?'])
+
+    const seguem = { M1: [
+      { premissa: 'rota /api/v2/contas', confere: false, classe: 'decidido', valorReal: '/api/v2/conta', feature: 'F1' },
+      { premissa: '2 telas na migração de tela', confere: false, classe: 'decidido', valorReal: '3 telas', feature: 'F1' },
+    ] }
+    const r2 = await rodar(comUmMilestone(), { contratoFalso: seguem })
+    assert.equal(r2.resultado.concluido, true)
+    assert.equal(r2.resultado.decisoesAssumidas.length, 2)
+  })
+
+  test('decisão do plano não é premissa a provar: V71 confirmado com V69 como última no código segue sem parar', async () => {
+    const contratoFalso = { M1: [
+      { premissa: 'última migration local é V69, V71 livre', confere: true, evidencia: 'db/migration/V69__y.sql' },
+    ] }
+    const r = await rodar(comUmMilestone(), { contratoFalso })
+    assert.equal(r.resultado.concluido, true)
+    assert.deepEqual(r.resultado.decisoesAssumidas, [])
+    assert.match(r.prompt('F2'), /Decisão confirmada: V71/)
+    assert.doesNotMatch(r.prompt('F2'), /Correção da prova de contrato/)
+    const p = r.prompt('contrato: M1')
+    assert.match(p, /O que o plano ou a SPEC marca como decisão .* não é premissa a provar: a missão segue a decisão\. Ela só entra na lista, como bloqueante, com conflito concreto no código \(ex\.: já existe arquivo com o mesmo número de migration\)/)
   })
 })
