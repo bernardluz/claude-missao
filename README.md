@@ -9,13 +9,14 @@ validado e corrigido em loop até fechar.
 
 ```
 Preparar      → branch, HEAD, raiz e a sujeira que já existe (linha de base), lidos pelo git-estado.mjs
-Simplicidade  → só com spec: confere a SPEC contra o código; pergunta ou corte PARA a missão
+Simplicidade  → só com spec: confere a SPEC contra o código; só decisão de produto ou risco PARA a missão
 Planejar      → só com spec: gera o plano (milestones, features, critérios, caca, userTesting)
 Pré-voo       → o ambiente roda testes e suíte? Falha para antes de qualquer commit
 Contexto      → contexto do plano por área, gerado UMA vez e reaproveitado na retomada
 
 Para cada milestone:
-  Prova de contrato → premissas sobre outros serviços conferidas no código do dono; falsa PARA
+  Prova de contrato → premissas sobre outros serviços conferidas no código do dono; trivial é corrigida
+                      pelo valor real, só divergência de comportamento, contrato ou risco PARA
   UI/UX             → só com tela: desenha telas e fluxos com checklist de UX, sem esperar aprovação
   Para cada feature, em série:
     implementa (worker nunca commita) → revisão independente → ajustes até aprovar → leitura do git →
@@ -69,6 +70,16 @@ descartados. Os demais vão para os próximos prompts, para `retomar.contexto` e
 etapa como "Aprendizados do projeto"; mudou, reinstale (`--verificar` acusa).
 Como vai em todo prompt, o arquivo precisa de curadoria: junte repetidos, corte o que envelheceu e mantenha só
 técnica e armadilha durável. O instalador avisa, sem falhar, quando ele passa de 60 linhas.
+
+**Prova de contrato.** O provador recebe o plano do milestone e a SPEC. Premissa que não confere e é só fato
+descritivo de código que já existe no dono (contagem de chamadas, caminho, nome atual de símbolo ou campo) é
+decidida: a spec da feature indicada recebe o valor real e a correção entra em `decisoesAssumidas`, para você
+revisar no fim. O que o plano ou a SPEC marca como decisão não é premissa a provar: a missão segue a decisão.
+Para a missão: escolha para código novo (número de migration, tabela ou rota nova, contrato novo) que o plano não
+fixou, conflito concreto no código com uma decisão do plano (ex.: já existe arquivo com o mesmo número de
+migration), divergência que muda comportamento ou contrato, ou que envolve dinheiro, acesso ou dado sensível sem
+resposta no código. Uma trava no código nunca decide premissa de migration (arquivo `V71__x.sql`, ou palavra
+migration, migração ou Flyway junto com um número de versão como V71).
 
 **SPEC simples.** A skill `criar-spec-simples`, instalada no global, orienta o agente principal a
 escrever a SPEC na conversa, antes da missão: quem usa, fluxo em cliques, cada peça com uso real,
@@ -245,9 +256,17 @@ Com o workflow instalado, peça ao Claude Code para rodar o workflow `missao` co
 plano em `args`:
 
 - **Com `spec`:** `{ "spec": "docs/specs/minha-entrega.md" }` (caminho no repositório ou o texto da
-  SPEC). A missão confere a simplicidade, gera o plano e segue. Se a simplicidade trouxer perguntas
-  ou cortes, ela para sem escrever código e devolve tudo em `perguntas` e `cortes`: decida, ajuste a
-  SPEC e rode de novo. O plano gerado volta no resultado (`plano`) e em `retomar.plano`.
+  SPEC). A missão confere a simplicidade, gera o plano e segue. Cada pergunta ou corte da simplicidade
+  vem classificado:
+  - **decidido** (tem sugestão e é técnico ou de desenho interno): a missão segue com a sugestão, que vai
+    ao planejador como decisão assumida e volta em `decisoesAssumidas` no resultado e no `retomar`,
+    para você revisar no fim;
+  - **bloqueante** (produto ou risco, como dinheiro, acesso ou dado sensível, sem resposta na SPEC nem no
+    código, ou corte de algo que a SPEC pede): a missão para sem escrever código e devolve os itens em
+    `bloqueantes`. Decida, ajuste a SPEC e rode de novo.
+
+  O plano gerado volta no resultado (`plano`) e em `retomar.plano`. Se o planejador usar o título
+  reservado "Suíte final", o milestone é renomeado para "Milestone final".
 - **Com o plano:** `{ "milestones": [...] }` ou `{ "plano": { "milestones": [...] } }`. Pula a
   simplicidade e o planejamento.
 
@@ -264,7 +283,7 @@ descartável `missao-teste/`.
 | `spec` | — | SPEC (caminho ou texto); obrigatório se não houver plano |
 | `milestones` | — | `[{ titulo, criterio, caca?, userTesting?, ui?, features: [{ titulo, spec }] }]`, com títulos únicos. `caca`: áreas de caça-bug (sem ela, um agente barato as deriva dos arquivos tocados). `userTesting`: a jornada que um usuário percorre. `ui`: as telas e fluxos do milestone (sem ela, um agente barato detecta se há tela) |
 | `plano` | — | `{ milestones }`, o mesmo que `milestones` |
-| `aceite` | — | Critérios de aceite. Sem eles, a seção de aceite da SPEC ou os critérios dos milestones |
+| `aceite` | — | Critérios de aceite (lista, ou um texto só). Sem eles, a seção de aceite da SPEC ou os critérios dos milestones |
 | `maxRodadasCaca` | 3 | Teto de rodadas de caça bug por milestone |
 | `modo` | — | `"enxugar"` para cortar código que já existe (também ligado pelo marcador `<!-- modo: enxugar -->` na SPEC em texto) |
 | `maxFeaturesPorMilestone` | 8 | Plano com milestone maior é recusado; divida-o |

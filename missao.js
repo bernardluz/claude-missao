@@ -198,6 +198,11 @@ const VALIDACAO = {
   properties: {
     aprendizados: APRENDIZADOS,
     aprovado: { type: 'boolean' },
+    // Validador de testes: evidência (teste ou arquivo:linha) de cada feature que saiu como já resolvida no código.
+    evidencias: {
+      type: 'array',
+      items: { type: 'object', properties: { feature: { type: 'string' }, evidencia: { type: 'string' } }, required: ['feature', 'evidencia'] },
+    },
     problemas: {
       type: 'array',
       items: {
@@ -214,15 +219,28 @@ const VALIDACAO = {
   required: ['aprovado', 'problemas'],
 }
 
+// Cada pergunta ou corte vem classificado: decidido (tem sugestão e é técnico ou de desenho interno; a missão segue com
+// ela) ou bloqueante (produto ou risco sem resposta na SPEC nem no código; só esse para a missão).
 const SIMPLICIDADE = {
   type: 'object',
   properties: {
     aprendizados: APRENDIZADOS,
-    ok: { type: 'boolean' },
-    perguntas: { type: 'array', items: { type: 'string' } },
-    cortes: { type: 'array', items: { type: 'string' } },
+    itens: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          tipo: { type: 'string', enum: ['pergunta', 'corte'] },
+          texto: { type: 'string' },
+          sugestao: { type: 'string' },
+          classe: { type: 'string', enum: ['decidido', 'bloqueante'] },
+          motivo: { type: 'string' },
+        },
+        required: ['tipo', 'texto', 'classe'],
+      },
+    },
   },
-  required: ['ok', 'perguntas', 'cortes'],
+  required: ['itens'],
 }
 
 const PLANO = {
@@ -279,7 +297,9 @@ const MARCA_ENXUGAR = '<!-- modo: enxugar -->'
 const modoValido = v => v === undefined || v === null || v === 'enxugar'
 const modoOk = args?.modo !== null && modoValido(args?.modo) && modoValido(args?.retomar?.modo)
 const MODO = args?.modo ?? args?.retomar?.modo ?? (SPEC?.includes(MARCA_ENXUGAR) ? 'enxugar' : null)
-const aceiteOk = args?.aceite === undefined || (Array.isArray(args.aceite) && args.aceite.every(x => typeof x === 'string'))
+// Critério de aceite passado como texto vira lista de um item.
+const CRITERIOS_ACEITE = typeof args?.aceite === 'string' ? [args.aceite] : args?.aceite
+const aceiteOk = CRITERIOS_ACEITE === undefined || (Array.isArray(CRITERIOS_ACEITE) && CRITERIOS_ACEITE.every(x => typeof x === 'string'))
 if (!args || !limitesOk || !aceiteOk || !modoOk || (!planoDado && !SPEC)) {
   throw new Error('args inválido: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } ou ' +
     '{ spec }, com maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, ' +
@@ -323,6 +343,14 @@ if (retomar && (!planoDado || ![...planoDado, SUITE].some(m => m.titulo === reto
   (retomar.inicioMissao !== undefined && (typeof retomar.inicioMissao !== 'string' || retomar.inicioMissao.length < 7)))) {
   throw new Error('args.retomar inválido: use o objeto `retomar` devolvido pela execução que parou ({ aPartirDe, inicioMissao, base, head, commits, concluidas, plano, contexto })')
 }
+
+// Decisões que a missão assumiu pela sugestão da verificação de simplicidade, para o usuário revisar no fim.
+const decisoesAssumidas = Array.isArray(args?.retomar?.decisoesAssumidas) ? args.retomar.decisoesAssumidas.filter(d => typeof d === 'string') : []
+// Features que saíram sem commit como já resolvidas no código e ainda sem evidência do scrutiny ({ titulo, spec,
+// milestone }). Atravessa a retomada; a feature sai da lista quando a evidência chega.
+const semEvidencia = Array.isArray(args?.retomar?.semEvidencia)
+  ? args.retomar.semEvidencia.filter(x => x && typeof x.titulo === 'string' && typeof x.spec === 'string' && typeof x.milestone === 'string')
+  : []
 
 // Contexto da missão: áreas do plano (hidratação, gerada uma vez) e aprendizados dos workers. Volta no retomar.
 const contexto = { areas: [], aprendizados: [] }
@@ -437,18 +465,29 @@ let milestones = planoDado
 if (!milestones) {
   phase('Simplicidade')
   const s = await comRetentativa('simplicidade', () => trabalhar(montar('verificar-simplicidade',
-    `${SPEC_NO_PROMPT()}\n\nLeia a SPEC e o código que ela toca e confira a simplicidade dela. Devolva em perguntas o ` +
-    'que precisa de decisão do usuário e em cortes o que sugere tirar ou trocar por algo mais simples, cada item com ' +
-    'o motivo e a evidência no código. Sem perguntas nem cortes, ok=true. Não escreva arquivos nem rode build: só ' +
-    'leitura.\n' + GIT_PROIBIDO),
+    `${SPEC_NO_PROMPT()}\n\nLeia a SPEC e o código que ela toca e confira a simplicidade dela. Devolva em itens cada ` +
+    'pergunta (decisão em aberto) e cada corte (o que tirar ou trocar por algo mais simples), com o motivo e a ' +
+    'evidência no código, a sugestão e a classe:\n' +
+    '- decidido: tem sugestão e é técnico ou de desenho interno; a missão segue com a sugestão, sem perguntar;\n' +
+    '- bloqueante: decisão de produto ou de risco (dinheiro, acesso, dado sensível) que nem a SPEC nem o código ' +
+    'respondem, ou corte que remove algo que a SPEC pede explicitamente.\n' +
+    'Na dúvida, item que envolve dinheiro, acesso ou autorização, ou dado sensível é bloqueante; os demais, com ' +
+    'sugestão segura, são decididos. Sem nada, itens vazio. Não escreva arquivos nem rode ' +
+    'build: só leitura.\n' + GIT_PROIBIDO),
     { label: 'simplicidade', phase: 'Simplicidade', agentType: comoAgente(CONFIG.leitor), schema: SIMPLICIDADE },
   ))
   if (!s) return { parouEm: 'simplicidade', motivo: 'o agente que verifica a simplicidade não respondeu', aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
-  if (!s.ok || s.perguntas.length || s.cortes.length) {
+  // Item sem sugestão não tem como ser decidido pela missão: conta como bloqueante.
+  const bloqueia = i => i.classe !== 'decidido' || !String(i.sugestao ?? '').trim()
+  const bloqueantes = s.itens.filter(bloqueia).map(i => ({ tipo: i.tipo, texto: i.texto, sugestao: i.sugestao ?? null, motivo: i.motivo ?? null }))
+  decisoesAssumidas.push(...s.itens.filter(i => !bloqueia(i)).map(i => `${i.tipo}: ${i.texto} → ${i.sugestao.trim()}`))
+  if (decisoesAssumidas.length) log(`simplicidade: ${decisoesAssumidas.length} decisão(ões) assumida(s) pela sugestão, para revisar no fim`)
+  if (bloqueantes.length) {
     return {
       parouEm: 'simplicidade',
-      motivo: 'a verificação de simplicidade trouxe perguntas ou cortes: decida, ajuste a SPEC e rode de novo (nenhum código foi escrito)',
-      perguntas: s.perguntas, cortes: s.cortes, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(),
+      motivo: `a verificação de simplicidade trouxe ${bloqueantes.length} decisão(ões) de produto ou de risco que a SPEC ` +
+        'não responde: decida, ajuste a SPEC e rode de novo (nenhum código foi escrito)',
+      bloqueantes, decisoesAssumidas, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(),
     }
   }
   phase('Planejar')
@@ -456,14 +495,25 @@ if (!milestones) {
     `${SPEC_NO_PROMPT()}\n\nA SPEC foi aprovada. Leia-a e o código que ela toca e gere o plano: milestones com titulo, ` +
     `criterio verificável, caca (áreas de caça-bug do milestone), userTesting (a jornada, só se houver uma que um ` +
     `usuário percorre; senão omita), ui (as telas e fluxos de usuário do milestone, só se houver; senão omita) e features com titulo único e spec. No máximo ${MAX_FEATURES_POR_MILESTONE} ` +
-    `features por milestone; o título "${SUITE.titulo}" é reservado. Não escreva arquivos nem rode build: só leitura.\n` +
-    GIT_PROIBIDO),
+    `features por milestone. Nunca use "${SUITE.titulo}" como título de milestone: ele é reservado. Não escreva ` +
+    'arquivos nem rode build: só leitura.' +
+    (decisoesAssumidas.length
+      ? `\nDecisões assumidas na verificação de simplicidade (aplique no plano; corte sai do plano):\n- ${decisoesAssumidas.join('\n- ')}`
+      : '') + '\n' + GIT_PROIBIDO),
     { label: 'planejar', phase: 'Planejar', agentType: comoAgente(CONFIG.leitor), schema: PLANO },
   ))
   // Campo opcional vazio conta como ausente.
   const gerado = p?.milestones?.map(m => ({ ...m, caca: m.caca?.length ? m.caca : undefined, userTesting: m.userTesting?.trim() || undefined, ui: m.ui?.trim() || undefined }))
+  // Título reservado no plano gerado é renomeado, sem parar a missão.
+  for (const m of gerado ?? []) {
+    if (m.titulo !== SUITE.titulo) continue
+    let n = 1
+    while (gerado.some(x => x.titulo === `Milestone final ${n > 1 ? n : ''}`.trim())) n++
+    m.titulo = `Milestone final ${n > 1 ? n : ''}`.trim()
+    log(`plano gerado usou o título reservado "${SUITE.titulo}": renomeado para "${m.titulo}"`)
+  }
   const erro = gerado ? erroDoPlano(gerado) : 'o agente de planejamento não respondeu'
-  if (erro) return { parouEm: 'planejar', motivo: `plano gerado não serve: ${erro}`, plano: p ?? null, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
+  if (erro) return { parouEm: 'planejar', motivo: `plano gerado não serve: ${erro}`, plano: p ?? null, decisoesAssumidas, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
   milestones = JSON.parse(JSON.stringify(gerado))
   log(`Plano gerado: ${milestones.length} milestones, ${milestones.reduce((n, m) => n + m.features.length, 0)} features`)
 }
@@ -535,7 +585,7 @@ if (!preVoo || !preVoo.ok) {
     : 'o agente de pré-voo não respondeu'
   // Parada antes de qualquer commit: devolve o retomar recebido ou um que recomeça no primeiro milestone.
   const r = retomar ?? parar(pendentes[0], head, [], [], {}).retomar
-  return { parouEm: 'pré-voo', motivo, faltando: preVoo?.faltando ?? [], plano: { milestones }, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), retomar: r }
+  return { parouEm: 'pré-voo', motivo, faltando: preVoo?.faltando ?? [], plano: { milestones }, decisoesAssumidas, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), retomar: r }
 }
 
 if (MODO === 'enxugar' && !medicaoAntes) {
@@ -773,12 +823,44 @@ async function implementar(features, fase) {
     let mensagem = r.mensagem
     for (const a of (r.naoSao ?? []).map(normalizar)) sujeiraVista.add(a)
     if (arquivos.size === 0) {
-      // Só correção pode sair sem mudança; feature original precisa entregar algo.
-      if (r.jaResolvido && fase === 'Corrigir') {
-        resultados.push({ feature: f.titulo, ...r })
+      if (!r.jaResolvido) return falhou('worker não declarou arquivos alterados.' + sujo)
+      // Já resolvido, mas com mudança nova na árvore que não é sujeira alheia já vista: volta ao mesmo worker para
+      // declarar (e a feature segue para revisão e commit) ou desfazer, em vez de a sobra passar à próxima feature.
+      for (let t = 1; !arquivos.size; t++) {
+        const c = await lerGit(antes, fase)
+        if (!c) return falhou(`não foi possível ler o repositório depois de "${f.titulo}" voltar já resolvida${causaGit()}.${sujo}`)
+        const sobra = caminhosPendentes(c).filter(a => !sujeiraVista.has(a))
+        if (!sobra.length) break
+        if (t > MAX_RODADAS_REVISAO) {
+          return falhou(`"${f.titulo}" voltou já resolvida, mas deixou mudança nova na árvore: ${sobra.join(', ')}.${sujo}`)
+        }
+        log(`${f.titulo}: voltou já resolvida com mudança nova na árvore (${sobra.join(', ')}) → declarar ou desfazer`)
+        const ajuste = await comRetentativa(`${f.titulo} · sobra ${t}`, () => trabalhar(promptTrabalho(f,
+          `\nVocê devolveu jaResolvido=true sem arquivos, mas a árvore tem mudança nova: ${sobra.join(', ')}. Se for ` +
+          'desta feature, declare-as em arquivos (a feature segue para revisão e commit); se forem suas e não da ' +
+          'feature, desfaça só elas e devolva de novo jaResolvido=true; se não foi você, não mexa e liste-as em naoSao.'),
+          { label: `${f.titulo} · sobra ${t}`, phase: fase, schema: RESULTADO_FEATURE },
+        ))
+        if (!ajuste) return falhou(`agente de ajuste não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas.${sujo}`)
+        if (!ajuste.concluida) return falhou(ajuste.resumo + sujo)
+        for (const a of (ajuste.naoSao ?? []).map(normalizar)) sujeiraVista.add(a)
+        arquivos = new Set((ajuste.arquivos ?? []).map(normalizar))
+        if (ajuste.mensagem) mensagem = ajuste.mensagem
+      }
+      // Já resolvido no código (ex.: feature que só confirma com teste o que já existe, e o teste já existe): conta
+      // como concluída sem commit e segue. Feature original assim vira decisão assumida, para revisar no fim.
+      if (!arquivos.size) {
+        resultados.push({ feature: f.titulo, ...r, semCommit: true })
+        if (fase !== 'Corrigir') {
+          const decisao = `já resolvida no código (${f.titulo}): ${r.resumo ?? 'sem mudança'}`
+          if (!decisoesAssumidas.includes(decisao)) decisoesAssumidas.push(decisao)
+          if (!semEvidencia.some(x => x.titulo === f.titulo && x.milestone === f.milestone)) {
+            semEvidencia.push({ titulo: f.titulo, spec: f.spec, milestone: f.milestone })
+          }
+          log(`${f.titulo}: já resolvida no código, concluída sem commit`)
+        }
         continue
       }
-      return falhou(r.jaResolvido ? 'feature original voltou sem mudança (jaResolvido)' : 'worker não declarou arquivos alterados.' + sujo)
     }
 
     let anteriores = []
@@ -875,7 +957,9 @@ async function implementar(features, fase) {
       commits.push(...adotados)
       for (const a of arquivos) { arquivosDaMissao.add(a); arquivosDoMilestone.add(a) }
       const commit = pos.daFeature?.at(-1) ?? declarado
-      resultados.push({ feature: f.titulo, ...r, commit, ...(pos.daFeature?.length > 1 ? { commitsDaFeature: pos.daFeature } : {}), rodadasRevisao: rodada })
+      // Commitada, a feature não é "já resolvida", mesmo que o primeiro retorno do worker tenha dito isso.
+      const { jaResolvido: _, ...doWorker } = r
+      resultados.push({ feature: f.titulo, ...doWorker, commit, ...(pos.daFeature?.length > 1 ? { commitsDaFeature: pos.daFeature } : {}), rodadasRevisao: rodada })
       // Commitado, o diff da feature já não é pendência dela na retomada.
       arquivos = new Set()
     }
@@ -999,7 +1083,9 @@ async function validarSuite(anteriores) {
 }
 
 // Dois validadores independentes sobre os commits do milestone, como os 2 runs da Factory.
-async function validar(m, base, arquivos, anteriores) {
+// jaResolvidas: features do milestone que saíram sem commit como já resolvidas no código; o validador de testes prova
+// cada uma com teste ou arquivo:linha, e a que fica sem evidência vira problema do loop de correção.
+async function validar(m, base, arquivos, anteriores, jaResolvidas = []) {
   if (m.suite) return validarSuite(anteriores)
   const intervalo = `${base}..${head}`
   const memoria = anteriores.length
@@ -1015,14 +1101,31 @@ async function validar(m, base, arquivos, anteriores) {
     )),
     () => comRetentativa(`testes: ${m.titulo}`, () => trabalhar(montar('scrutiny',
       `Rode, no HEAD atual, os testes focados que cobrem os commits ${intervalo} do milestone "${m.titulo}"${semDeFora()} ` +
-      `e confira o critério: ${m.criterio}.${reviseDeFora(m.titulo)} Não altere código. Reporte falhas com a saída relevante.` + memoria +
+      `e confira o critério: ${m.criterio}.${reviseDeFora(m.titulo)} Não altere código. Reporte falhas com a saída relevante.` +
+      (jaResolvidas.length
+        ? '\nEstas features saíram sem commit, como já resolvidas no código. Para cada uma, devolva em evidencias a ' +
+          'prova concreta (o teste que a cobre, ou arquivo:linha) que você conferiu; sem prova, não a inclua:\n' +
+          jaResolvidas.map(f => `- ${f.titulo}: ${f.spec}`).join('\n')
+        : '') + memoria +
       '\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
       { label: `testes: ${m.titulo}`, phase: 'Scrutiny', schema: VALIDACAO },
     )),
   ])
   if (!revisao || !testes) return { erro: 'um validador não respondeu' }
-  const problemas = [...revisao.problemas, ...testes.problemas]
-  const aprovado = revisao.aprovado && testes.aprovado
+  // Título comparado sem diferença de caixa e espaços, para não gastar rodada de correção à toa.
+  const chave = t => String(t ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  const provadas = new Set((testes.evidencias ?? []).filter(e => String(e.evidencia ?? '').trim()).map(e => chave(e.feature)))
+  // A feature provada sai da lista que atravessa a retomada.
+  for (const f of jaResolvidas.filter(f => provadas.has(chave(f.titulo)))) {
+    const i = semEvidencia.findIndex(x => x.titulo === f.titulo && x.milestone === f.milestone)
+    if (i >= 0) semEvidencia.splice(i, 1)
+  }
+  const naoProvadas = jaResolvidas.filter(f => !provadas.has(chave(f.titulo))).map(f => ({
+    problema: `a feature "${f.titulo}" saiu como já resolvida no código, sem evidência (teste ou arquivo:linha) de que ` +
+      `cumpre a spec: ${f.spec}. Entregue o que falta, ou o teste que a comprova`,
+  }))
+  const problemas = [...revisao.problemas, ...testes.problemas, ...naoProvadas]
+  const aprovado = revisao.aprovado && testes.aprovado && !naoProvadas.length
   if (!aprovado && problemas.length === 0) return { erro: 'validação reprovou sem apontar problemas' }
   return { aprovado, problemas }
 }
@@ -1037,6 +1140,11 @@ const CONTRATO = {
         type: 'object',
         properties: {
           premissa: { type: 'string' }, evidencia: { type: 'string' }, confere: { type: 'boolean' }, pergunta: { type: 'string' },
+          // Premissa que não confere: decidido (correção óbvia no código, como contagem, número, nome ou caminho) ou
+          // bloqueante (muda comportamento ou contrato, ou envolve dinheiro, acesso ou dado sensível sem resposta).
+          classe: { type: 'string', enum: ['decidido', 'bloqueante'] },
+          valorReal: { type: 'string' },
+          feature: { type: 'string' },
         },
         required: ['premissa', 'confere'],
       },
@@ -1071,20 +1179,52 @@ const VEREDITO = {
 const AREAS_CACA = { type: 'object', properties: { areas: { type: 'array', items: { type: 'string' } } }, required: ['areas'] }
 
 // Antes de implementar: as premissas das features sobre o que o milestone não controla, conferidas no código do dono.
-// Premissa falsa para a missão com todas as perguntas juntas.
+// Premissa que não confere e é só fato descritivo de código que já existe (decidido, com o valor real e a feature)
+// corrige a spec dessa feature, vira decisão assumida e a missão segue. Decisão do plano ou da SPEC não é premissa: a
+// missão a segue. Escolha nova que o plano não fixou, conflito concreto com decisão do plano e divergência de
+// comportamento, contrato ou risco param a missão com todas as perguntas juntas.
 async function provarContrato(m, aFazer) {
   const r = await comRetentativa(`contrato: ${m.titulo}`, () => trabalhar(montar('prova-de-contrato',
-    `Milestone "${m.titulo}" (critério: ${m.criterio}). Features a implementar:\n` +
+    // O provador enxerga o plano do milestone e a SPEC, onde ficam as decisões explícitas que ele não pode trocar.
+    `Plano do milestone "${m.titulo}" (critério: ${m.criterio}${m.ui ? `; telas: ${m.ui}` : ''}). Features a implementar:\n` +
     aFazer.map(f => `- ${f.titulo}: ${f.spec}`).join('\n') + '\n\n' +
+    (SPEC ? `${SPEC_NO_PROMPT()}\n\n` : '') +
+    'O que o plano ou a SPEC marca como decisão ("Decisão", "confirmado", "Decisões já fechadas") não é premissa a ' +
+    'provar: a missão segue a decisão. Ela só entra na lista, como bloqueante, com conflito concreto no código (ex.: já ' +
+    'existe arquivo com o mesmo número de migration).\n' +
     'Liste as premissas que essas features fazem sobre outros serviços, módulos ou libs (rotas, campos, ids, ' +
     'comportamento) e confira cada uma no código do dono. Devolva cada premissa com a evidência (arquivo e linha), ' +
-    'confere=true ou false e, se ela não confere ou é ambígua, a pergunta objetiva para o usuário. Sem premissa ' +
-    'externa, devolva a lista vazia. Não escreva arquivos nem rode build: só leitura.\n' + GIT_PROIBIDO, guiasDe(m)),
+    'confere=true ou false. Premissa que não confere leva classe, feature (o título exato da feature afetada) e:\n' +
+    '- decidido: só fato descritivo de código que JÁ existe no dono, sem mudar comportamento nem contrato (contagem ' +
+    'de chamadas, caminho, nome atual de símbolo ou campo existente); devolva o valor real em valorReal;\n' +
+    '- bloqueante: escolha para código novo (número de migration, nome de tabela ou rota nova, contrato novo) que o ' +
+    'plano não fixou, conflito concreto no código com uma decisão do plano ou da SPEC, divergência que muda ' +
+    'comportamento ou contrato, ou que envolve dinheiro, acesso ou dado sensível sem resposta no código; devolva a ' +
+    'pergunta objetiva para o usuário. Na dúvida, bloqueante.\n' +
+    'Sem premissa externa, devolva a lista vazia. Não escreva arquivos nem rode build: só leitura.\n' + GIT_PROIBIDO, guiasDe(m)),
     { label: `contrato: ${m.titulo}`, phase: 'Contrato', agentType: comoAgente(CONFIG.leitor), schema: CONTRATO },
   ))
   if (!r) return { motivo: 'o agente da prova de contrato não respondeu' }
-  const falsas = r.premissas.filter(p => !p.confere)
-  if (!falsas.length) return null
+  const naoConferem = r.premissas.filter(p => !p.confere)
+  // Só é decidida a premissa com valor real e feature certa; migration nunca é, porque o número é escolha do plano.
+  // Ancorada em migration de verdade: arquivo Flyway (V71__x.sql, V maiúsculo), ou palavra de migration (inclusive
+  // em pt-BR) junto com número de versão. "Migração de tela" sem versão não trava.
+  const ehMigration = p => {
+    const t = `${p.premissa} ${p.valorReal ?? ''}`
+    return /\bV\d+__/.test(t) || (/\bmigrations?\b|\bflyway\b|\bmigraç(ão|ões)(?![\p{L}\p{N}_])/iu.test(t) && /\bV\d+\b/.test(t))
+  }
+  const decididas = naoConferem.filter(p => p.classe === 'decidido' && String(p.valorReal ?? '').trim() &&
+    aFazer.some(f => f.titulo === p.feature) && !ehMigration(p))
+  const falsas = naoConferem.filter(p => !decididas.includes(p))
+  const correcoes = {}
+  for (const p of decididas) {
+    const texto = `${p.premissa} → ${p.valorReal.trim()}`
+    ;(correcoes[p.feature] ??= []).push(texto)
+    const decisao = `contrato (${m.titulo}): ${texto}`
+    if (!decisoesAssumidas.includes(decisao)) decisoesAssumidas.push(decisao)
+  }
+  if (decididas.length) log(`${m.titulo}: ${decididas.length} premissa(s) corrigida(s) pelo valor real do código, para revisar no fim`)
+  if (!falsas.length) return { correcoes }
   return {
     motivo: `prova de contrato: ${falsas.length} premissa(s) do milestone não conferem no código do dono; responda as ` +
       'perguntas, ajuste o plano e retome (nada deste milestone foi implementado)',
@@ -1203,8 +1343,8 @@ const ACEITE = {
 }
 // Liga cada critério de aceite (args.aceite, a seção de aceite da SPEC ou os critérios dos milestones) a uma evidência.
 async function conferirAceite() {
-  const fonte = Array.isArray(args.aceite) && args.aceite.length
-    ? `Critérios de aceite:\n- ${args.aceite.join('\n- ')}`
+  const fonte = Array.isArray(CRITERIOS_ACEITE) && CRITERIOS_ACEITE.length
+    ? `Critérios de aceite:\n- ${CRITERIOS_ACEITE.join('\n- ')}`
     : SPEC
       ? `${SPEC_NO_PROMPT()}\n\nUse os critérios de aceite da SPEC (a seção de aceite; se ela não tiver, os critérios dos milestones abaixo).\n` +
         milestones.map(m => `- ${m.titulo}: ${m.criterio}`).join('\n')
@@ -1261,9 +1401,9 @@ function guiasDe(m) {
 function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
-    parouEm: m.titulo, ...extra, deForaTocando: [...deForaTocando], sujeiraCommitada: [...sujeiraCommitada], plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
+    parouEm: m.titulo, ...extra, decisoesAssumidas: [...decisoesAssumidas], deForaTocando: [...deForaTocando], sujeiraCommitada: [...sujeiraCommitada], plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
     sugestaoAprendizados: sugestaoAprendizados(),
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs }, sujeiraInicial: [...sujeiraInicial], sujeiraCommitada: [...sujeiraCommitada], arquivosPendentes: extra.arquivosPendentes ?? [] },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], deForaTocando: [...deForaTocando], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs }, decisoesAssumidas: [...decisoesAssumidas], semEvidencia: semEvidencia.map(x => ({ ...x })), sujeiraInicial: [...sujeiraInicial], sujeiraCommitada: [...sujeiraCommitada], arquivosPendentes: extra.arquivosPendentes ?? [] },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1376,11 +1516,16 @@ for (const [i, m] of pendentes.entries()) {
     }
   }
   // Scrutiny validator (a antiga validação): testes, lint, typecheck e revisão contra o critério, com correções.
-  const scrutiny = () => ateFechar(anteriores => validar(m, base, conf.arquivos, anteriores))
+  const jaResolvidas = () => semEvidencia.filter(x => x.milestone === m.titulo)
+  const scrutiny = () => ateFechar(anteriores => validar(m, base, conf.arquivos, anteriores, jaResolvidas()))
 
   if (!m.suite && aFazer.length) {
     const e = await provarContrato(m, aFazer)
-    if (e) return pararAqui(e)
+    if (e.motivo) return pararAqui(e)
+    // A spec da feature leva o valor real que a prova de contrato achou no código.
+    for (const f of features) {
+      if (e.correcoes[f.titulo]) f.spec += `\nCorreção da prova de contrato (valor real no código): ${e.correcoes[f.titulo].join('; ')}`
+    }
     await desenharUi(m, aFazer)
   }
 
@@ -1473,4 +1618,4 @@ for (const [i, m] of pendentes.entries()) {
 }
 
 const enxugar = MODO === 'enxugar' ? { modo: MODO, medicao: { antes: medicaoAntes, depois: medicaoDepois, ...(antesParcial ? { antesParcial: true } : {}) } } : {}
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, deForaTocando, sujeiraCommitada, ...enxugar, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, decisoesAssumidas, deForaTocando, sujeiraCommitada, ...enxugar, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }

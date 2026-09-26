@@ -559,3 +559,13 @@ test('etapa UI/UX (telas e design) fica com o milestone e não vira feature', ()
   assert.deepEqual(m1.validacoes.map(v => [v.label.split(':')[0], v.estado]), [['telas', 'aprovado'], ['design', 'rodando']])
   assert.equal(m.atual, 'UI/UX de M1 base')
 })
+
+test('resumo da simplicidade conta itens decididos e bloqueantes', () => {
+  const raiz = temp()
+  execucao(raiz, 'wf_1', [['preparo', {}], ['simplicidade', { itens: [
+    { tipo: 'corte', texto: 't', classe: 'decidido', sugestao: 's' },
+    { tipo: 'pergunta', texto: 'p', classe: 'bloqueante' },
+  ] }], ['contexto do plano', { areas: SKILLS.skills }]])
+  const [m] = missoes(raiz)
+  assert.equal(m.linhaDoTempo.find(c => c.label === 'simplicidade').resumo, '1 decidido(s), 1 bloqueante(s)')
+})

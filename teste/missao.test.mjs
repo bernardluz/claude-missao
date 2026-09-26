@@ -53,6 +53,66 @@ describe('fluxo principal', () => {
     assert.match(r.prompt('F2 · ajuste 1'), /o commit falhou \(gate ou hook\): saida=1\nlint falhou/)
   })
 
+  test('feature original já resolvida no código conta como concluída sem commit, vira decisão assumida e segue', async () => {
+    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true }, evidencias: [[{ feature: 'F1', evidencia: 'teste/f1.test.mjs:10' }]] })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.commits, 2)
+    assert.match(r.prompt('testes: M1'), /Estas features saíram sem commit, como já resolvidas no código\. .*\n- F1: /)
+    assert.doesNotMatch(r.prompt('testes: M2'), /Estas features saíram sem commit/)
+    assert.equal(r.contar('revisão: F1'), 0)
+    assert.equal(r.contar('commit: F1'), 0)
+    assert.deepEqual(r.resultado.decisoesAssumidas, ['já resolvida no código (F1): o teste já existe'])
+    const f1 = r.resultado.relatorio.flatMap(x => x.features ?? []).find(x => x.feature === 'F1')
+    assert.equal(f1.jaResolvido, true)
+    assert.equal(f1.semCommit, true)
+  })
+
+  test('feature já resolvida sem evidência no scrutiny vira problema e segue o loop de correção', async () => {
+    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true }, evidencias: [[], [{ feature: 'F1', evidencia: 'teste/f1.test.mjs:10' }]] })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('correção 1.1 (M1)'), 1)
+    assert.match(r.prompt('correção 1.1 (M1)'), /a feature "F1" saiu como já resolvida no código, sem evidência \(teste ou arquivo:linha\)/)
+    assert.equal(r.contar('testes: M1'), 2)
+  })
+
+  test('já resolvida com mudança nova na árvore volta ao mesmo worker para declarar ou desfazer', async () => {
+    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true }, jaResolvidoSuja: { F1: true } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('F1 · sobra 1'), 1)
+    assert.match(r.prompt('F1 · sobra 1'), /Você devolveu jaResolvido=true sem arquivos, mas a árvore tem mudança nova: x\/a\.js\. Se for desta feature, declare-as/)
+    assert.equal(r.contar('revisão: F1'), 1)
+    assert.equal(r.contar('commit: F1'), 1)
+    assert.equal(r.commits, 3)
+    assert.deepEqual(r.resultado.decisoesAssumidas, [])
+    const f1 = r.resultado.relatorio.flatMap(x => x.features ?? []).find(x => x.feature === 'F1')
+    assert.equal(f1.jaResolvido, undefined)
+    assert.ok(f1.commit)
+    assert.doesNotMatch(r.prompt('testes: M1'), /Estas features saíram sem commit/)
+  })
+
+  test('já resolvida sem evidência atravessa a retomada e sai da lista quando a evidência chega', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { jaResolvidoFeature: { F1: true }, validacao: [2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'M1')
+    assert.deepEqual(p1.resultado.retomar.semEvidencia, [{ titulo: 'F1', spec: 's', milestone: 'M1' }])
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), { evidencias: [[{ feature: 'F1', evidencia: 'teste/f1.test.mjs:10' }]] }, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('F1'), 0)
+    assert.match(p2.prompt('testes: M1'), /Estas features saíram sem commit, como já resolvidas no código\. .*\n- F1: s/)
+
+    const provada = await rodar(plano(), { jaResolvidoFeature: { F1: true }, validacao: [2, 2], evidencias: [[{ feature: 'F1', evidencia: 'teste/f1.test.mjs:10' }]] },
+      { git: ['base0000'], sujo: false })
+    assert.equal(provada.resultado.parouEm, 'M1')
+    assert.deepEqual(provada.resultado.retomar.semEvidencia, [])
+  })
+
+  test('evidência casa o título da feature sem diferença de caixa e espaços', async () => {
+    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true }, evidencias: [[{ feature: '  f1 ', evidencia: 'teste/f1.test.mjs:10' }]] })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('testes: M1'), 1)
+    assert.equal(r.contar('correção 1.1 (M1)'), 0)
+  })
+
   test('worker sem arquivos declarados para logo', async () => {
     const r = await rodar(plano(), { semArquivos: true })
     assert.match(r.resultado.motivo, /não declarou arquivos/)
@@ -618,15 +678,43 @@ describe('spec, planejamento e pré-voo', () => {
     await assert.rejects(rodar({}), /args inválido/)
   })
 
-  test('simplicidade com perguntas ou cortes para antes de planejar, devolvendo tudo junto', async () => {
-    const r = await rodar(comSpec(), { perguntas: ['a fila é mesmo assíncrona?'], cortes: ['tabela de histórico sem uso'] })
+  test('simplicidade: só item bloqueante para a missão, sem código, e devolve também as decisões assumidas', async () => {
+    const simplicidade = [
+      { tipo: 'pergunta', texto: 'o limite de saque muda?', classe: 'bloqueante', sugestao: 'manter', motivo: 'dinheiro' },
+      { tipo: 'corte', texto: 'tabela de histórico sem uso', classe: 'decidido', sugestao: 'tirar a tabela' },
+      { tipo: 'pergunta', texto: 'qual índice?', classe: 'decidido', sugestao: '' },
+    ]
+    const r = await rodar(comSpec(), { simplicidade })
     assert.equal(r.resultado.parouEm, 'simplicidade')
-    assert.deepEqual(r.resultado.perguntas, ['a fila é mesmo assíncrona?'])
-    assert.deepEqual(r.resultado.cortes, ['tabela de histórico sem uso'])
-    assert.match(r.resultado.motivo, /nenhum código foi escrito/)
+    assert.match(r.resultado.motivo, /2 decisão\(ões\) de produto ou de risco .*nenhum código foi escrito/)
+    // Decidido sem sugestão não tem como seguir: vira bloqueante.
+    assert.deepEqual(r.resultado.bloqueantes.map(b => b.texto), ['o limite de saque muda?', 'qual índice?'])
+    assert.deepEqual(r.resultado.decisoesAssumidas, ['corte: tabela de histórico sem uso → tirar a tabela'])
     assert.equal(r.contar('planejar'), 0)
     assert.equal(r.commits, 0)
     assert.match(r.prompt('simplicidade'), /SPEC \(texto, ou caminho de arquivo no repositório para ler inteiro\):\ndocs\/spec\.md/)
+    assert.match(r.prompt('simplicidade'), /bloqueante: decisão de produto ou de risco \(dinheiro, acesso, dado sensível\)/)
+    assert.match(r.prompt('simplicidade'), /corte que remove algo que a SPEC pede explicitamente/)
+    assert.match(r.prompt('simplicidade'), /Na dúvida, item que envolve dinheiro, acesso ou autorização, ou dado sensível é bloqueante; os demais, com sugestão segura, são decididos/)
+    assert.doesNotMatch(r.prompt('simplicidade'), /Na dúvida entre as duas, e com sugestão segura, decidido/)
+  })
+
+  test('simplicidade só com itens decididos não para: as decisões vão ao planejador, ao resultado e ao retomar', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const simplicidade = [
+      { tipo: 'pergunta', texto: 'enum ou texto no status?', classe: 'decidido', sugestao: 'enum' },
+      { tipo: 'corte', texto: 'fila de reprocessamento', classe: 'decidido', sugestao: 'chamada HTTP síncrona' },
+    ]
+    const decisoes = ['pergunta: enum ou texto no status? → enum', 'corte: fila de reprocessamento → chamada HTTP síncrona']
+    const p1 = await rodar(comSpec(), { simplicidade, suite: [2, 2] }, estado)
+    assert.equal(p1.contar('planejar'), 1)
+    assert.match(p1.prompt('planejar'), /Decisões assumidas na verificação de simplicidade \(aplique no plano; corte sai do plano\):\n- pergunta: enum ou texto no status\? → enum\n- corte: fila de reprocessamento → chamada HTTP síncrona/)
+    assert.equal(p1.resultado.parouEm, 'Suíte final')
+    assert.deepEqual(p1.resultado.decisoesAssumidas, decisoes)
+    assert.deepEqual(p1.resultado.retomar.decisoesAssumidas, decisoes)
+    const p2 = await rodar(comSpec({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.deepEqual(p2.resultado.decisoesAssumidas, decisoes)
   })
 
   test('spec aprovada: plano gerado executa e volta no resultado e no retomar; a retomada não replaneja', async () => {
@@ -644,10 +732,21 @@ describe('spec, planejamento e pré-voo', () => {
   })
 
   test('plano gerado inválido para sem código', async () => {
-    const r = await rodar(comSpec(), { planoGerado: [{ titulo: 'Suíte final', criterio: 'c', features: [{ titulo: 'H', spec: 's' }] }] })
+    const r = await rodar(comSpec(), { planoGerado: [{ titulo: 'G', criterio: 'c', features: [{ titulo: 'H', spec: 's' }, { titulo: 'H', spec: 's' }] }] })
     assert.equal(r.resultado.parouEm, 'planejar')
-    assert.match(r.resultado.motivo, /plano gerado não serve: "Suíte final" é reservado/)
+    assert.match(r.resultado.motivo, /plano gerado não serve: títulos de feature repetidos: H/)
     assert.equal(r.commits, 0)
+  })
+
+  test('título reservado no plano gerado é renomeado, sem parar', async () => {
+    const r = await rodar(comSpec(), { planoGerado: [
+      { titulo: 'Suíte final', criterio: 'c', features: [{ titulo: 'H', spec: 's' }] },
+      { titulo: 'Milestone final', criterio: 'c', features: [{ titulo: 'H2', spec: 's' }] },
+    ] })
+    assert.equal(r.resultado.concluido, true)
+    assert.deepEqual(r.resultado.plano.milestones.map(x => x.titulo), ['Milestone final 2', 'Milestone final'])
+    assert.ok(r.logs.includes('plano gerado usou o título reservado "Suíte final": renomeado para "Milestone final 2"'))
+    assert.match(r.prompt('planejar'), /Nunca use "Suíte final" como título de milestone/)
   })
 
   test('pré-voo que falha para antes de qualquer commit, com o que falta e um retomar que recomeça do início', async () => {
@@ -817,8 +916,11 @@ describe('caça final e aceite', () => {
     assert.match(r.prompt('aceite'), /docs\/spec\.md\n\nUse os critérios de aceite da SPEC/)
   })
 
-  test('aceite inválido é recusado', async () => {
-    await assert.rejects(rodar(plano({ aceite: 'tudo' })), /args inválido/)
+  test('aceite como texto vira lista de um item; tipo inválido é recusado', async () => {
+    const r = await rodar(plano({ aceite: 'POST /x devolve 201' }))
+    assert.equal(r.resultado.concluido, true)
+    assert.match(r.prompt('aceite'), /Critérios de aceite:\n- POST \/x devolve 201/)
+    await assert.rejects(rodar(plano({ aceite: 3 })), /args inválido/)
   })
 })
 
@@ -1052,10 +1154,10 @@ describe('aprendizados nas paradas e na retomada', () => {
     executar(gerar(readFileSync(NUCLEO, 'utf8'), {}, '', lerEtapas(), texto).replace('export const meta', 'const meta'), args, opcoes, estado)
 
   test('paradas de simplicidade, planejar e pré-voo trazem a sugestão', async () => {
-    const simp = await rodar({ spec: 's.md' }, { perguntas: ['p?'], aprendizados: { simplicidade: ['rode com forks=1'] } })
+    const simp = await rodar({ spec: 's.md' }, { simplicidade: [{ tipo: 'pergunta', texto: 'p?', classe: 'bloqueante' }], aprendizados: { simplicidade: ['rode com forks=1'] } })
     assert.equal(simp.resultado.parouEm, 'simplicidade')
     assert.equal(simp.resultado.sugestaoAprendizados, '- rode com forks=1\n')
-    const plan = await rodar({ spec: 's.md' }, { planoGerado: [{ titulo: 'Suíte final', criterio: 'c', features: [{ titulo: 'H', spec: 's' }] }], aprendizados: { planejar: ['x'] } })
+    const plan = await rodar({ spec: 's.md' }, { planoGerado: [{ titulo: 'G', criterio: 'c', features: [{ titulo: 'H', spec: 's' }, { titulo: 'H', spec: 's' }] }], aprendizados: { planejar: ['x'] } })
     assert.equal(plan.resultado.parouEm, 'planejar')
     assert.equal(plan.resultado.sugestaoAprendizados, '- x\n')
     const voo = await rodar(plano(), { preVooFalta: ['Docker'], aprendizados: { 'pré-voo': ['docker info antes'] } })
@@ -1372,5 +1474,77 @@ describe('retomada com commit de fora em arquivo da missão', () => {
     assert.equal(p2.resultado.concluido, true)
     assert.deepEqual(p2.resultado.deForaTocando, [{ milestone: 'M1', commits: ['alheio00'], arquivos: ['x/a.js'] }])
     assert.match(p2.prompt('revisão: M1'), /Arquivos da missão tocados por commit de fora: x\/a\.js \(alheio00\)/)
+  })
+})
+
+describe('prova de contrato decide o trivial', () => {
+  const comUmMilestone = () => ({ milestones: [{ titulo: 'M1', criterio: 'c', features: [{ titulo: 'F1', spec: 's' }, { titulo: 'F2', spec: 'Decisão confirmada: V71' }] }] })
+
+  test('contagem de chamadas que não confere corrige só a feature indicada, vira decisão assumida e segue', async () => {
+    const contratoFalso = { M1: [
+      { premissa: '18 call sites de pagar()', confere: false, classe: 'decidido', valorReal: '20 call sites', feature: 'F1' },
+    ] }
+    const r = await rodar(comUmMilestone(), { contratoFalso })
+    assert.equal(r.resultado.concluido, true)
+    assert.match(r.prompt('F1'), /Correção da prova de contrato \(valor real no código\): 18 call sites de pagar\(\) → 20 call sites/)
+    assert.doesNotMatch(r.prompt('F2'), /Correção da prova de contrato/)
+    assert.deepEqual(r.resultado.decisoesAssumidas, ['contrato (M1): 18 call sites de pagar() → 20 call sites'])
+  })
+
+  test('prompt do provador traz o plano e a SPEC e manda escolha nova e decisão explícita para bloqueante', async () => {
+    const r = await rodar({ spec: 'docs/spec.md', plano: { milestones: comUmMilestone().milestones } })
+    const p = r.prompt('contrato: M1')
+    assert.match(p, /Plano do milestone "M1" \(critério: c\)\. Features a implementar:\n- F1: s\n- F2: Decisão confirmada: V71/)
+    assert.match(p, /SPEC \(texto, ou caminho de arquivo no repositório para ler inteiro\):\ndocs\/spec\.md/)
+    assert.match(p, /decidido: só fato descritivo de código que JÁ existe no dono/)
+    assert.match(p, /bloqueante: escolha para código novo \(número de migration, nome de tabela ou rota nova, contrato novo\) que o plano não fixou, conflito concreto no código com uma decisão do plano ou da SPEC/)
+    assert.doesNotMatch(p, /próxima versão livre de migration/)
+  })
+
+  test('migration, decidido sem feature ou sem valor real e bloqueante param com as perguntas juntas', async () => {
+    const contratoFalso = { M1: [
+      { premissa: 'próxima migration V71', confere: false, classe: 'decidido', valorReal: 'V70', feature: 'F2', pergunta: 'V71 ou V70?' },
+      { premissa: 'GET /contas devolve saldo', confere: false, classe: 'bloqueante', pergunta: 'o saldo vem de onde?' },
+      { premissa: 'campo idConta', confere: false, classe: 'decidido', feature: 'F1' },
+      { premissa: '3 telas', confere: false, classe: 'decidido', valorReal: '4 telas' },
+    ] }
+    const r = await rodar(comUmMilestone(), { contratoFalso })
+    assert.equal(r.resultado.parouEm, 'M1')
+    assert.match(r.resultado.motivo, /prova de contrato: 4 premissa\(s\)/)
+    assert.deepEqual(r.resultado.perguntas, ['V71 ou V70?', 'o saldo vem de onde?', 'confirmar: campo idConta', 'confirmar: 3 telas'])
+    assert.deepEqual(r.resultado.decisoesAssumidas, [])
+    assert.equal(r.contar('F1'), 0)
+  })
+
+  test('trava de migration: arquivo Flyway e a palavra migration param; rota /v2 e migração de tela não', async () => {
+    const param = { M1: [
+      { premissa: 'arquivo V71__x.sql', confere: false, classe: 'decidido', valorReal: 'V70__x.sql', feature: 'F1', pergunta: 'arquivo?' },
+      { premissa: 'migration V71', confere: false, classe: 'decidido', valorReal: 'V70', feature: 'F1', pergunta: 'número?' },
+      { premissa: 'próxima migração é V71', confere: false, classe: 'decidido', valorReal: 'V70', feature: 'F1', pergunta: 'pt-BR?' },
+    ] }
+    const r1 = await rodar(comUmMilestone(), { contratoFalso: param })
+    assert.equal(r1.resultado.parouEm, 'M1')
+    assert.deepEqual(r1.resultado.perguntas, ['arquivo?', 'número?', 'pt-BR?'])
+
+    const seguem = { M1: [
+      { premissa: 'rota /api/v2/contas', confere: false, classe: 'decidido', valorReal: '/api/v2/conta', feature: 'F1' },
+      { premissa: '2 telas na migração de tela', confere: false, classe: 'decidido', valorReal: '3 telas', feature: 'F1' },
+    ] }
+    const r2 = await rodar(comUmMilestone(), { contratoFalso: seguem })
+    assert.equal(r2.resultado.concluido, true)
+    assert.equal(r2.resultado.decisoesAssumidas.length, 2)
+  })
+
+  test('decisão do plano não é premissa a provar: V71 confirmado com V69 como última no código segue sem parar', async () => {
+    const contratoFalso = { M1: [
+      { premissa: 'última migration local é V69, V71 livre', confere: true, evidencia: 'db/migration/V69__y.sql' },
+    ] }
+    const r = await rodar(comUmMilestone(), { contratoFalso })
+    assert.equal(r.resultado.concluido, true)
+    assert.deepEqual(r.resultado.decisoesAssumidas, [])
+    assert.match(r.prompt('F2'), /Decisão confirmada: V71/)
+    assert.doesNotMatch(r.prompt('F2'), /Correção da prova de contrato/)
+    const p = r.prompt('contrato: M1')
+    assert.match(p, /O que o plano ou a SPEC marca como decisão .* não é premissa a provar: a missão segue a decisão\. Ela só entra na lista, como bloqueante, com conflito concreto no código \(ex\.: já existe arquivo com o mesmo número de migration\)/)
   })
 })

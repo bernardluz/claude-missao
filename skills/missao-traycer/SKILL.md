@@ -39,8 +39,11 @@ O plano vem do usuário, de um artefato do epic ou de `args`:
 são as áreas de caça-bug do milestone; `userTesting`, a jornada que um usuário percorre.
 
 Também pode vir só a `spec` (caminho ou texto). Nesse caso, antes de tudo:
-1. **Simplicidade.** Um filho só-leitura compara a SPEC com o código e devolve perguntas e cortes sugeridos.
-   Havendo qualquer um, pare e mostre tudo junto ao usuário, sem escrever código.
+1. **Simplicidade.** Um filho só-leitura compara a SPEC com o código e devolve perguntas e cortes, cada um com
+   sugestão e classe. Decidido (técnico ou de desenho interno, com sugestão): siga com a sugestão, grave-a em
+   `estado/` como decisão assumida e mostre-a ao usuário no fim. Bloqueante (produto ou risco sem resposta na SPEC
+   nem no código; na dúvida, o que toca dinheiro, acesso ou dado sensível): pare e mostre todos juntos, sem
+   escrever código.
 2. **Planejar.** Aprovada, um filho só-leitura gera o plano no formato acima. Grave-o em `estado/`: a retomada não
    replaneja.
 
@@ -114,7 +117,13 @@ para levar ao `AGENTS.md` da área.
 
 Antes das features de cada milestone, a **prova de contrato**: um filho só-leitura lista as premissas das features
 sobre outros serviços ou módulos (rotas, campos, ids, comportamento) e confere cada uma no código do dono. Premissa
-que não confere: pare com todas as perguntas juntas, antes de implementar.
+que não confere e é só fato descritivo de código que já existe (contagem de chamadas, caminho, nome atual de símbolo
+ou campo): corrija a feature indicada com o valor real, grave como decisão assumida em `estado/` e siga. O que o
+plano ou a SPEC marca como decisão não é premissa a provar: siga a decisão. Escolha para código novo (número de
+migration, tabela ou rota nova, contrato novo) que o plano não fixou, conflito concreto no código com uma decisão do
+plano (ex.: já existe arquivo com o mesmo número de migration), divergência que muda comportamento ou contrato, ou
+que envolve dinheiro, acesso ou dado sensível sem resposta: pare com todas as perguntas juntas, antes de
+implementar. Passe ao filho o plano do milestone e a SPEC.
 
 Depois, em milestone com tela (`ui` no plano, ou tela que você identifica nas features), a **UI/UX**: um filho desenha
 as telas e fluxos com a técnica e o checklist de `ui-ux` (use `/design`, `impeccable` ou o Artifact de design se houver;

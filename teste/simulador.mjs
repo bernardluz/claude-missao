@@ -26,6 +26,9 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   naoSao, mensagem   { [label]: valor } o que esse worker devolve nesses campos
 //   semArquivos        worker não declara arquivos
 //   jaResolvidoCorrecao correções voltam jaResolvido
+//   jaResolvidoFeature { [feature]: true } essa feature original volta jaResolvido, sem arquivos
+//   jaResolvidoSuja    { [feature]: true } essa feature volta jaResolvido, mas deixa o diff dela na árvore
+//   evidencias         [[{ feature, evidencia }] por rodada] o que o validador de testes do scrutiny prova
 //   branchNaConferencia branch devolvida pela conferência (simula troca de branch)
 //   commitDeFora       { [label]: sha } outra sessão commita os próprios arquivos logo depois desse agente
 //   commitDeForaTudo   { [label]: sha } outra sessão faz `git commit -a` logo depois desse agente e leva o diff
@@ -38,7 +41,7 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   arquivosDeFora     arquivos dos commits que não são da missão (padrão ['z/fora.js'])
 //   areas              áreas que o agente do contexto do plano devolve
 //   aprendizados       { [label]: [textos] } aprendizados que esse agente devolve
-//   perguntas, cortes  o que a verificação de simplicidade devolve (qualquer um deles faz a missão parar)
+//   simplicidade       [itens { tipo, texto, sugestao, classe }] que a verificação de simplicidade devolve
 //   planoGerado        milestones que o agente de planejamento devolve (padrão: os de plano())
 //   preVooFalta        [itens] o pré-voo acusa o que falta no ambiente
 //   contratoFalso      { [milestone]: [premissas] } premissas que a prova de contrato devolve (use confere: false)
@@ -79,6 +82,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   let resumida = o.conferenciaResumida ?? 0
   let semPorCommit = o.conferenciaSemPorCommit ?? 0
   let rodadaValidacao = 0
+  let rodadaTestes = 0
   let rodadaSuite = 0
   const rodadaUT = {}
   let rodadaAceite = 0
@@ -107,7 +111,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       return null
     }
     if (l === 'contexto do plano') return { areas: o.areas ?? [] }
-    if (l === 'simplicidade') return { ok: !o.perguntas && !o.cortes, perguntas: o.perguntas ?? [], cortes: o.cortes ?? [] }
+    if (l === 'simplicidade') return { itens: o.simplicidade ?? [] }
     if (l === 'planejar') return { milestones: o.planoGerado ?? plano().milestones }
     // Quando o prompt pede a medição (modo enxugar), o pré-voo mede o antes e o aceite, o depois.
     const pedeMedicao = /devolva em medicao/.test(prompt)
@@ -177,7 +181,10 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       return { aprovado: n === 0, problemas: problemas(n, 'u').map((p, j) => (o.utUx?.[i]?.[j] ? { ...p, ux: true } : p)) }
     }
     if (opt.phase === 'Scrutiny') {
-      if (l.startsWith('testes: ')) return { aprovado: true, problemas: [] }
+      if (l.startsWith('testes: ')) {
+        const ev = (o.evidencias ?? [])[rodadaTestes++]
+        return { aprovado: true, problemas: [], ...(ev ? { evidencias: ev } : {}) }
+      }
       const n = (o.validacao ?? [])[rodadaValidacao++] ?? 0
       return { aprovado: n === 0, problemas: problemas(n, 'v') }
     }
@@ -211,6 +218,10 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     // worker, ajuste ou correção
     if (o.jaResolvidoCorrecao && opt.phase === 'Corrigir' && !l.includes('ajuste')) {
       return { concluida: true, jaResolvido: true, arquivos: [], resumo: 'já resolvido' }
+    }
+    if (o.jaResolvidoFeature?.[l]) {
+      if (o.jaResolvidoSuja?.[l]) estado.sujo = true
+      return { concluida: true, jaResolvido: true, arquivos: [], resumo: 'o teste já existe' }
     }
     const daFeature = o.arquivosDaFeature?.[l.split(' · ')[0]]
     estado.sujo = daFeature ?? true
