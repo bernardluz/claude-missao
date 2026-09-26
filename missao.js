@@ -1112,13 +1112,15 @@ async function validar(m, base, arquivos, anteriores, jaResolvidas = []) {
     )),
   ])
   if (!revisao || !testes) return { erro: 'um validador não respondeu' }
-  const provadas = new Set((testes.evidencias ?? []).filter(e => String(e.evidencia ?? '').trim()).map(e => e.feature))
+  // Título comparado sem diferença de caixa e espaços, para não gastar rodada de correção à toa.
+  const chave = t => String(t ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  const provadas = new Set((testes.evidencias ?? []).filter(e => String(e.evidencia ?? '').trim()).map(e => chave(e.feature)))
   // A feature provada sai da lista que atravessa a retomada.
-  for (const f of jaResolvidas.filter(f => provadas.has(f.titulo))) {
+  for (const f of jaResolvidas.filter(f => provadas.has(chave(f.titulo)))) {
     const i = semEvidencia.findIndex(x => x.titulo === f.titulo && x.milestone === f.milestone)
     if (i >= 0) semEvidencia.splice(i, 1)
   }
-  const naoProvadas = jaResolvidas.filter(f => !provadas.has(f.titulo)).map(f => ({
+  const naoProvadas = jaResolvidas.filter(f => !provadas.has(chave(f.titulo))).map(f => ({
     problema: `a feature "${f.titulo}" saiu como já resolvida no código, sem evidência (teste ou arquivo:linha) de que ` +
       `cumpre a spec: ${f.spec}. Entregue o que falta, ou o teste que a comprova`,
   }))

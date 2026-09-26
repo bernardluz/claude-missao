@@ -106,6 +106,13 @@ describe('fluxo principal', () => {
     assert.deepEqual(provada.resultado.retomar.semEvidencia, [])
   })
 
+  test('evidência casa o título da feature sem diferença de caixa e espaços', async () => {
+    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true }, evidencias: [[{ feature: '  f1 ', evidencia: 'teste/f1.test.mjs:10' }]] })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('testes: M1'), 1)
+    assert.equal(r.contar('correção 1.1 (M1)'), 0)
+  })
+
   test('worker sem arquivos declarados para logo', async () => {
     const r = await rodar(plano(), { semArquivos: true })
     assert.match(r.resultado.motivo, /não declarou arquivos/)
