@@ -546,3 +546,16 @@ test('etapas v2: contrato, caça, verificação e user testing ficam com o miles
   assert.equal(resumo('caça: geral (M1 base, rodada 1)'), '1 achado(s)')
   assert.equal(resumo('verificação 1: achado 1 (M1 base, rodada 1)'), 'refutado')
 })
+
+test('etapa UI/UX (telas e design) fica com o milestone e não vira feature', () => {
+  const raiz = temp()
+  execucao(raiz, 'wf_1', [
+    ['preparo', {}], ['contexto do plano', { areas: SKILLS.skills }], ['telas: M1 base', { ui: 'tela' }],
+    ['design: M1 base', undefined],
+  ])
+  const [m] = missoes(raiz)
+  const m1 = m.milestones[0]
+  assert.deepEqual(m1.features.map(f => f.titulo), ['F1 Admin: base e Contas', 'F2 lista'])
+  assert.deepEqual(m1.validacoes.map(v => [v.label.split(':')[0], v.estado]), [['telas', 'aprovado'], ['design', 'rodando']])
+  assert.equal(m.atual, 'UI/UX de M1 base')
+})

@@ -243,10 +243,10 @@ function classificar(label) {
   if (['preparo', 'skills da missão', 'contexto do plano', 'conferência'].includes(label)) return { tipo: label, alvo: null }
   // Etapas da missão v2. Globais: sem alvo. Por milestone: ficam junto das validações dele; "final" é a suíte final.
   if (['simplicidade', 'planejar', 'pré-voo', 'aceite', 'commit de fora'].includes(label)) return { tipo: 'etapa', alvo: null }
-  const doMilestone = label.match(/^(contrato|áreas de caça|user testing): (.+)$/) ??
+  const doMilestone = label.match(/^(contrato|áreas de caça|user testing|telas|design): (.+)$/) ??
     label.match(/^(caça|verificação \d+): .* \((.+), rodada \d+\)$/)
   if (doMilestone) {
-    const tipo = doMilestone[1] === 'contrato' ? 'contrato' : doMilestone[1] === 'user testing' ? 'userTesting' : 'caca'
+    const tipo = { contrato: 'contrato', 'user testing': 'userTesting', telas: 'ui', design: 'ui' }[doMilestone[1]] ?? 'caca'
     return { tipo, alvo: doMilestone[2] === 'final' ? SUITE : doMilestone[2] }
   }
   return { tipo: 'trabalho', alvo: label }
@@ -383,7 +383,7 @@ function montarMissao(id, runs) {
     for (const c of r.chamadas) {
       const chamada = { ...c, execucao, viva: r.viva, ref: `${r.runId}/${c.agentId}` }
       linhaDoTempo.push(chamada)
-      if (['testes', 'contrato', 'caca', 'userTesting'].includes(c.tipo) || (c.tipo === 'revisao' && porTitulo.has(c.alvo))) {
+      if (['testes', 'contrato', 'caca', 'userTesting', 'ui'].includes(c.tipo) || (c.tipo === 'revisao' && porTitulo.has(c.alvo))) {
         porTitulo.get(c.alvo)?.validacoes.push(chamada)
         continue
       }
@@ -510,6 +510,7 @@ function aprovou(c) {
   const r = c.resultado
   if (c.tipo === 'contrato') return Array.isArray(r?.premissas) && r.premissas.every(p => p.confere)
   if (c.tipo === 'caca') return !!r && !(r.achados?.length || r.confirmado)
+  if (c.tipo === 'ui') return !!r
   return r?.aprovado === true
 }
 
@@ -549,6 +550,7 @@ function rotuloEtapa(c) {
   if (c.tipo === 'contrato') return `prova de contrato de ${c.alvo}`
   if (c.tipo === 'caca') return `caça bug em ${c.alvo}`
   if (c.tipo === 'userTesting') return `user testing de ${c.alvo}`
+  if (c.tipo === 'ui') return `UI/UX de ${c.alvo}`
   if (c.tipo === 'trabalho') return `implementando ${c.alvo}`
   return c.label
 }
