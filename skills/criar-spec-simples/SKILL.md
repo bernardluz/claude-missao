@@ -5,7 +5,7 @@ description: "Escreve a SPEC de uma entrega no modelo de simplicidade, antes de 
 
 # SPEC simples
 
-Instalada pelo `claude-missao`: edite lá, não a cópia no projeto.
+Instalada pelo `claude-missao` no global do Claude e do Codex: edite em `{{CLAUDE_MISSAO}}` e reinstale (veja "Atualizar a missão").
 
 Você escreve a SPEC na conversa, com o usuário, antes da missão. A missão depois confere a simplicidade, gera o plano e
 executa. Uma SPEC boa cabe numa página e deixa claro o que **não** entra.

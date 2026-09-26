@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { gerar, instalar, chavesAceitas, lerEtapas, lerAprendizados, NUCLEO, SKILL, ETAPAS_DIR } from '../instalar.mjs'
+import { gerar, instalar, instalarGlobal, skillGlobal, chavesAceitas, lerEtapas, lerAprendizados, NUCLEO, SKILLS, ETAPAS_DIR } from '../instalar.mjs'
 import { executar, plano } from './simulador.mjs'
 
 const nucleo = readFileSync(NUCLEO, 'utf8')
@@ -80,28 +80,6 @@ test('não sobrescreve missao.js mantido à mão, salvo --forcar', () => {
   instalar(raiz)
 })
 
-test('instala a skill missao-traycer e a verificação acusa cópia editada', () => {
-  const raiz = projetoTemporario()
-  const { destinoSkill } = instalar(raiz)
-  assert.equal(readFileSync(destinoSkill, 'utf8'), readFileSync(SKILL, 'utf8').replace(/\r\n/g, '\n'))
-  assert.match(readFileSync(destinoSkill, 'utf8'), /^---\nname: missao-traycer\n/)
-  writeFileSync(destinoSkill, readFileSync(destinoSkill, 'utf8') + '\neditada\n')
-  assert.equal(instalar(raiz, { verificar: true }).atualizado, false)
-  instalar(raiz)
-  assert.equal(instalar(raiz, { verificar: true }).atualizado, true)
-})
-
-test('não sobrescreve skill mantida à mão, salvo --forcar', () => {
-  const raiz = projetoTemporario()
-  const destinoSkill = join(raiz, '.claude', 'skills', 'missao-traycer', 'SKILL.md')
-  mkdirSync(dirname(destinoSkill), { recursive: true })
-  writeFileSync(destinoSkill, 'manual\n')
-  assert.throws(() => instalar(raiz), /não foi gerado pelo instalador/)
-  assert.equal(readFileSync(destinoSkill, 'utf8'), 'manual\n')
-  instalar(raiz, { forcar: true })
-  assert.match(readFileSync(destinoSkill, 'utf8'), /name: missao-traycer/)
-})
-
 test('sem configuração no projeto, instala o padrão', () => {
   const raiz = projetoTemporario()
   const { destino } = instalar(raiz)
@@ -166,14 +144,6 @@ test('embute a técnica de cada etapa; o projeto complementa ou substitui, e eta
   assert.equal(instalar(raiz, { verificar: true }).atualizado, false)
   writeFileSync(join(dir, 'deploy.md'), 'x')
   assert.throws(() => instalar(raiz), /etapa desconhecida: .*deploy\.md/)
-})
-
-test('instala a skill criar-spec-simples', () => {
-  const raiz = projetoTemporario()
-  instalar(raiz)
-  const skill = readFileSync(join(raiz, '.claude', 'skills', 'criar-spec-simples', 'SKILL.md'), 'utf8')
-  assert.match(skill, /^---\nname: criar-spec-simples\n/)
-  assert.match(skill, /Instalada pelo `claude-missao`/)
 })
 
 test('complemento de etapa salvo com BOM ainda reconhece <!-- substitui -->', () => {
@@ -268,20 +238,6 @@ test('aprendizados.md acima de 60 linhas gera aviso, sem falhar a instalação',
   assert.match(cli.stderr, /^aviso: .*tem 61 linhas/m)
 })
 
-test('instala a skill enxugar-codigo e embute os complementos .enxugar das etapas', () => {
-  const raiz = projetoTemporario()
-  const { destino } = instalar(raiz)
-  const skill = readFileSync(join(raiz, '.claude', 'skills', 'enxugar-codigo', 'SKILL.md'), 'utf8')
-  assert.match(skill, /^---\nname: enxugar-codigo\n/)
-  assert.match(skill, /Instalada pelo `claude-missao`/)
-  assert.match(skill, /<!-- modo: enxugar -->/)
-  const etapas = lerEtapas(raiz)
-  assert.deepEqual(Object.keys(etapas).filter(k => k.endsWith('.enxugar')), ['aceite.enxugar', 'caca-bug.enxugar',
-    'corrigir.enxugar', 'implementar.enxugar', 'planejar.enxugar', 'pre-voo.enxugar', 'prova-de-contrato.enxugar',
-    'revisar.enxugar', 'scrutiny.enxugar', 'ui-ux.enxugar', 'verificar-simplicidade.enxugar'])
-  assert.ok(readFileSync(destino, 'utf8').includes(JSON.stringify(etapas['implementar.enxugar'])))
-})
-
 test('git-estado.mjs lista os arquivos de dentro de pasta nova, não a pasta', () => {
   const raiz = mkdtempSync(join(tmpdir(), 'missao-git-'))
   const git = (...a) => execFileSync('git', ['-C', raiz, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' })
@@ -298,4 +254,60 @@ test('git-estado.mjs lista os arquivos de dentro de pasta nova, não a pasta', (
   const e = JSON.parse(execFileSync('node', ['.claude/missao/git-estado.mjs', 'HEAD'], { cwd: raiz, encoding: 'utf8' }))
   assert.deepEqual(e.pendencias.sort(), ['?? pkg/novo/A.kt', '?? pkg/novo/B.kt'])
   assert.equal(e.contagem.pendencias, 2)
+})
+
+test('instalação por projeto não grava skills: só missao.js e git-estado.mjs', () => {
+  const raiz = projetoTemporario()
+  instalar(raiz)
+  assert.equal(existsSync(join(raiz, '.claude', 'skills')), false)
+  assert.ok(existsSync(join(raiz, '.claude', 'workflows', 'missao.js')))
+  assert.ok(existsSync(join(raiz, '.claude', 'missao', 'git-estado.mjs')))
+  assert.equal(instalar(raiz, { verificar: true }).atualizado, true)
+})
+
+test('--global grava as 3 skills no Claude e no Codex, com o caminho e o origin injetados, e substitui cópia antiga', () => {
+  const home = mkdtempSync(join(tmpdir(), 'missao-home-'))
+  const antiga = join(home, '.claude', 'skills', 'missao-traycer', 'SKILL.md')
+  mkdirSync(dirname(antiga), { recursive: true })
+  writeFileSync(antiga, 'cópia antiga\n')
+  const repo = 'C:/repos/claude-missao'
+  const r = instalarGlobal({ home, repo, origem: 'https://example.test/claude-missao.git' })
+  assert.equal(r.destinos.length, 6)
+  for (const base of ['.claude', '.codex']) {
+    for (const [nome] of SKILLS) {
+      const texto = readFileSync(join(home, base, 'skills', nome, 'SKILL.md'), 'utf8')
+      assert.match(texto, new RegExp(`^---\\nname: ${nome}\\n`), `${base} ${nome}`)
+      assert.doesNotMatch(texto, /\{\{CLAUDE_MISSAO\}\}/, `${base} ${nome}`)
+      assert.match(texto, /## Atualizar a missão\n\nRepositório: `C:\/repos\/claude-missao` \(origin: https:\/\/example\.test\/claude-missao\.git\)\./)
+      assert.match(texto, /1\. `git -C "C:\/repos\/claude-missao" pull`/)
+      assert.match(texto, /2\. `node "C:\/repos\/claude-missao\/instalar\.mjs" --global`/)
+      assert.match(texto, /`node "C:\/repos\/claude-missao\/instalar\.mjs" <projeto> --verificar`; se estiver desatualizado,\n {3}`node "C:\/repos\/claude-missao\/instalar\.mjs" <projeto>`/)
+    }
+  }
+  const traycer = readFileSync(antiga, 'utf8')
+  assert.match(traycer, /node "C:\/repos\/claude-missao\/git-estado\.mjs" <base>/)
+  assert.match(traycer, /`C:\/repos\/claude-missao\/etapas\/<etapa>\.md`/)
+  assert.match(traycer, /Se não tiver, instale antes de começar:\n`node "C:\/repos\/claude-missao\/instalar\.mjs" <raiz do projeto>`/)
+  assert.match(traycer, /Leia `\.claude\/missao\.config\.json` do projeto atual/)
+})
+
+test('--verificar sem projeto confere as skills globais', () => {
+  const home = mkdtempSync(join(tmpdir(), 'missao-home-'))
+  const opcoes = { home, repo: 'C:/r', origem: '' }
+  assert.equal(instalarGlobal({ ...opcoes, verificar: true }).atualizado, false)
+  instalarGlobal(opcoes)
+  assert.equal(instalarGlobal({ ...opcoes, verificar: true }).atualizado, true)
+  writeFileSync(join(home, '.codex', 'skills', 'enxugar-codigo', 'SKILL.md'), 'editada\n')
+  assert.equal(instalarGlobal({ ...opcoes, verificar: true }).atualizado, false)
+  assert.doesNotMatch(skillGlobal('x {{CLAUDE_MISSAO}}', 'C:/r', ''), /origin/)
+})
+
+test('instala os complementos .enxugar das etapas', () => {
+  const raiz = projetoTemporario()
+  const { destino } = instalar(raiz)
+  const etapas = lerEtapas(raiz)
+  assert.deepEqual(Object.keys(etapas).filter(k => k.endsWith('.enxugar')), ['aceite.enxugar', 'caca-bug.enxugar',
+    'corrigir.enxugar', 'implementar.enxugar', 'planejar.enxugar', 'pre-voo.enxugar', 'prova-de-contrato.enxugar',
+    'revisar.enxugar', 'scrutiny.enxugar', 'ui-ux.enxugar', 'verificar-simplicidade.enxugar'])
+  assert.ok(readFileSync(destino, 'utf8').includes(JSON.stringify(etapas['implementar.enxugar'])))
 })

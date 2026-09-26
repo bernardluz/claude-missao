@@ -5,7 +5,7 @@ description: "Diagnostica um código já pronto e escreve a SPEC para cortá-lo 
 
 # Enxugar código
 
-Instalada pelo `claude-missao`: edite lá, não a cópia no projeto.
+Instalada pelo `claude-missao` no global do Claude e do Codex: edite em `{{CLAUDE_MISSAO}}` e reinstale (veja "Atualizar a missão").
 
 Você conduz, na conversa, o diagnóstico de um alvo que já existe (serviço, módulo, app) e termina numa SPEC. Depois, a
 missão roda com `modo: 'enxugar'` e executa. Referência: um serviço financeiro saiu de 23 mil linhas, 34 tabelas e 6

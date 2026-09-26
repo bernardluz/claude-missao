@@ -1,28 +1,31 @@
-// Instala o workflow missao num projeto.
-// Lê <projeto>/.claude/missao.config.json (opcional) e gera <projeto>/.claude/workflows/missao.js
-// com a configuração embutida em CONFIG_PROJETO. Copia também, sem alterar, os arquivos de COPIAS: a skill
-// missao-traycer (lê a configuração do projeto ao rodar), as skills criar-spec-simples e enxugar-codigo e o script de estado do git que a
-// conferência roda. Embute a técnica de cada etapa (etapas/ + .claude/missao/etapas/ do projeto) em ETAPAS e os
-// aprendizados do projeto (.claude/missao/aprendizados.md) em APRENDIZADOS_PROJETO.
+// Instala a missão.
+// Por projeto: lê <projeto>/.claude/missao.config.json (opcional) e gera <projeto>/.claude/workflows/missao.js com a
+// configuração embutida em CONFIG_PROJETO, a técnica de cada etapa (etapas/ + .claude/missao/etapas/ do projeto) em
+// ETAPAS e os aprendizados do projeto (.claude/missao/aprendizados.md) em APRENDIZADOS_PROJETO. Copia também o script
+// de estado do git que a conferência roda.
+// Global: copia as skills de SKILLS para ~/.claude/skills e ~/.codex/skills, com o caminho deste repositório e a URL
+// do origin injetados na hora, e a seção "Atualizar a missão".
 //
 // Uso:
-//   node instalar.mjs <caminho-do-projeto>              gera ou atualiza a cópia instalada
-//   node instalar.mjs <caminho-do-projeto> --verificar  sai com código 1 se a cópia estiver desatualizada
+//   node instalar.mjs <caminho-do-projeto>              gera ou atualiza a cópia instalada no projeto
+//   node instalar.mjs <caminho-do-projeto> --verificar  sai com código 1 se a cópia do projeto estiver desatualizada
 //   node instalar.mjs <caminho-do-projeto> --forcar     substitui um missao.js que não foi gerado pelo instalador
+//   node instalar.mjs --global                          instala ou atualiza as skills no Claude e no Codex
+//   node instalar.mjs --verificar                       sai com código 1 se as skills globais estiverem desatualizadas
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
 const aqui = dirname(fileURLToPath(import.meta.url))
 export const NUCLEO = join(aqui, 'missao.js')
-export const SKILL = join(aqui, 'skills', 'missao-traycer', 'SKILL.md')
-// Arquivos copiados como estão: origem no claude-missao → destino relativo à raiz do projeto. Cada um traz a marca
-// MARCA_COPIA, para o instalador não sobrescrever uma versão mantida à mão.
+// Skills globais (Claude e Codex), nunca copiadas para o projeto.
+export const SKILLS = ['missao-traycer', 'criar-spec-simples', 'enxugar-codigo'].map(nome => [nome, join(aqui, 'skills', nome, 'SKILL.md')])
+export const SKILL = SKILLS[0][1]
+// Arquivos copiados como estão para o projeto: origem no claude-missao → destino relativo à raiz do projeto. Cada um
+// traz a marca MARCA_COPIA, para o instalador não sobrescrever uma versão mantida à mão.
 export const COPIAS = [
-  [SKILL, '.claude/skills/missao-traycer/SKILL.md'],
-  [join(aqui, 'skills', 'criar-spec-simples', 'SKILL.md'), '.claude/skills/criar-spec-simples/SKILL.md'],
-  [join(aqui, 'skills', 'enxugar-codigo', 'SKILL.md'), '.claude/skills/enxugar-codigo/SKILL.md'],
   [join(aqui, 'git-estado.mjs'), '.claude/missao/git-estado.mjs'],
 ]
 const MARCA_COPIA = '`claude-missao`'
@@ -32,6 +35,44 @@ const BLOCO_APRENDIZADOS = /\/\/ @aprendizados-inicio[^\n]*\nconst APRENDIZADOS_
 const MARCA = 'gerado por claude-missao'
 // Sem BOM e com LF: arquivo salvo no Windows não pode esconder o marcador <!-- substitui -->.
 const lf = texto => texto.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+const lerLf = arquivo => (existsSync(arquivo) ? lf(readFileSync(arquivo, 'utf8')) : null)
+
+// Skill global: o caminho deste repositório no lugar de {{CLAUDE_MISSAO}} e a seção "Atualizar a missão" no fim. Nada
+// da máquina fica versionado: tudo entra na hora de instalar.
+const MARCADOR_REPO = '{{CLAUDE_MISSAO}}'
+function origemRemota() {
+  try {
+    return execFileSync('git', ['-C', aqui, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    return ''
+  }
+}
+export function secaoAtualizar(repo, origem) {
+  return `## Atualizar a missão
+
+Repositório: \`${repo}\`${origem ? ` (origin: ${origem})` : ''}.
+
+1. \`git -C "${repo}" pull\`
+2. \`node "${repo}/instalar.mjs" --global\`: atualiza estas skills no Claude e no Codex.
+3. Em cada projeto: \`node "${repo}/instalar.mjs" <projeto> --verificar\`; se estiver desatualizado,
+   \`node "${repo}/instalar.mjs" <projeto>\`.
+`
+}
+export function skillGlobal(texto, repo = aqui, origem = origemRemota()) {
+  const caminho = repo.replace(/\\/g, '/')
+  return `${lf(texto).replaceAll(MARCADOR_REPO, caminho).trimEnd()}\n\n${secaoAtualizar(caminho, origem)}`
+}
+export function instalarGlobal({ verificar = false, home = homedir(), repo = aqui, origem = origemRemota() } = {}) {
+  const copias = [join(home, '.claude', 'skills'), join(home, '.codex', 'skills')].flatMap(base =>
+    SKILLS.map(([nome, origemSkill]) => ({ destino: join(base, nome, 'SKILL.md'), conteudo: skillGlobal(readFileSync(origemSkill, 'utf8'), repo, origem) })))
+  const destinos = copias.map(c => c.destino)
+  if (verificar) return { destinos, atualizado: copias.every(c => lerLf(c.destino) === c.conteudo) }
+  for (const c of copias) {
+    mkdirSync(dirname(c.destino), { recursive: true })
+    writeFileSync(c.destino, c.conteudo)
+  }
+  return { destinos }
+}
 
 // Técnica de cada etapa: etapas/<etapa>.md no claude-missao. O projeto complementa em .claude/missao/etapas/<etapa>.md;
 // o texto dele vai depois do núcleo, ou o substitui quando a primeira linha é SUBSTITUI.
@@ -121,13 +162,11 @@ export function instalar(projeto, { verificar = false, forcar = false } = {}) {
   const gerado = gerar(readFileSync(NUCLEO, 'utf8'), config, origemAtual(), lerEtapas(raiz), aprendizados)
   const destino = join(raiz, '.claude', 'workflows', 'missao.js')
   const copias = COPIAS.map(([origem, relativo]) => ({ destino: join(raiz, relativo), conteudo: lf(readFileSync(origem, 'utf8')) }))
-  const lerLf = arquivo => (existsSync(arquivo) ? lf(readFileSync(arquivo, 'utf8')) : null)
-  const destinoSkill = copias[0].destino
 
   if (verificar) {
     const atual = lerLf(destino)
     const atualizado = atual !== null && semOrigem(atual) === semOrigem(gerado) && copias.every(c => lerLf(c.destino) === c.conteudo)
-    return { destino, destinoSkill, atualizado, avisos }
+    return { destino, atualizado, avisos }
   }
   // Não sobrescreve arquivo mantido à mão: só o que este instalador gerou, salvo --forcar.
   for (const [arquivo, marca] of [[destino, MARCA], ...copias.map(c => [c.destino, MARCA_COPIA])]) {
@@ -139,16 +178,28 @@ export function instalar(projeto, { verificar = false, forcar = false } = {}) {
     mkdirSync(dirname(arquivo), { recursive: true })
     writeFileSync(arquivo, conteudo)
   }
-  return { destino, destinoSkill, config: existsSync(arquivoConfig) ? arquivoConfig : null, avisos }
+  return { destino, config: existsSync(arquivoConfig) ? arquivoConfig : null, avisos }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [projeto, ...opcoes] = process.argv.slice(2)
-  if (!projeto) {
-    console.error('uso: node instalar.mjs <caminho-do-projeto> [--verificar | --forcar]')
+  const argumentos = process.argv.slice(2)
+  const projeto = argumentos.find(a => !a.startsWith('--'))
+  const opcoes = argumentos.filter(a => a.startsWith('--'))
+  if (!projeto && !opcoes.includes('--global') && !opcoes.includes('--verificar')) {
+    console.error('uso: node instalar.mjs <caminho-do-projeto> [--verificar | --forcar] | --global | --verificar')
     process.exit(2)
   }
   try {
+    if (!projeto) {
+      // Sem projeto: skills globais no Claude e no Codex.
+      const r = instalarGlobal({ verificar: opcoes.includes('--verificar') })
+      if (opcoes.includes('--verificar')) {
+        console.log(r.atualizado ? 'skills globais atualizadas' : `skills globais desatualizadas ou ausentes: ${r.destinos.join(', ')}`)
+        process.exit(r.atualizado ? 0 : 1)
+      }
+      console.log(`skills instaladas: ${r.destinos.join(', ')}`)
+      process.exit(0)
+    }
     if (opcoes.includes('--verificar')) {
       const r = instalar(projeto, { verificar: true })
       for (const a of r.avisos) console.warn(`aviso: ${a}`)

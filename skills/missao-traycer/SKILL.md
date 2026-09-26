@@ -6,7 +6,11 @@ description: "Executa no Traycer uma SPEC ou um plano grande em milestones e fea
 # Missão no Traycer
 
 Você é o **coordenador**. Agentes filhos implementam e revisam; você cuida do plano, dos artefatos, do git e dos
-commits. Você nunca escreve código de produto. Instalada pelo `claude-missao`: edite lá, não a cópia no projeto.
+commits. Você nunca escreve código de produto. Instalada pelo `claude-missao` no global do Claude e do Codex: edite em
+`{{CLAUDE_MISSAO}}` e reinstale (veja "Atualizar a missão").
+
+O projeto precisa da missão instalada (`.claude/workflows/missao.js`). Se não tiver, instale antes de começar:
+`node "{{CLAUDE_MISSAO}}/instalar.mjs" <raiz do projeto>`.
 
 Antes de despachar, leia `../traycer-references/loop-protocol.md` se ele existir. Toda passagem de trabalho vai com
 `expectReply: true`. Depois de despachar, **encerre o turno**: a resposta do filho é o que te acorda. Nunca termine um
@@ -41,8 +45,9 @@ Também pode vir só a `spec` (caminho ou texto). Nesse caso, antes de tudo:
    replaneja.
 
 A técnica curta de cada etapa (`verificar-simplicidade`, `planejar`, `pre-voo`, `prova-de-contrato`,
-`implementar`, `revisar`, `scrutiny`, `corrigir`, `caca-bug`, `user-testing`, `aceite`) está embutida em
-`const ETAPAS` de `.claude/workflows/missao.js`. Passe a da etapa no briefing do filho correspondente.
+`implementar`, `revisar`, `scrutiny`, `corrigir`, `caca-bug`, `user-testing`, `aceite`) está em
+`{{CLAUDE_MISSAO}}/etapas/<etapa>.md`, com o complemento do projeto em `.claude/missao/etapas/<etapa>.md`, se existir.
+Passe a da etapa no briefing do filho correspondente.
 
 | Limite | Padrão | Ao estourar |
 |---|---|---|
@@ -58,7 +63,7 @@ o usuário só é chamado nas paradas.
 
 ## Configuração do projeto
 
-Leia `.claude/missao.config.json` se existir. As chaves são as mesmas do workflow `missao`:
+Leia `.claude/missao.config.json` do projeto atual, se existir. As chaves são as mesmas do workflow `missao`:
 
 - `regrasTestes`, `regrasProjeto`: arquivos citados aos filhos.
 - `revisor`, `revisoresPorPasta`, `leitor`: nomes em `.claude/agents/`. O filho Traycer recebe a instrução de ler
@@ -92,7 +97,7 @@ da SPEC), os bugs já corrigidos pela caça e as lições da missão (regras cob
 
 ### 1. Preparar
 
-Toda leitura de git da missão usa `node .claude/missao/git-estado.mjs <base>`: ele imprime um JSON com `head`,
+Toda leitura de git da missão usa `node "{{CLAUDE_MISSAO}}/git-estado.mjs" <base>`, rodado na raiz do projeto: ele imprime um JSON com `head`,
 `branch`, `raiz`, `limpo`, `pendencias`, `commits` (em ordem) e `arquivos`. Confira pelo JSON, não por resumo.
 Para preparar, rode com `HEAD` como base e grave as `pendencias` como linha de base. Branch `main`: pare e diga por quê. Grave `inicio` = HEAD no estado.
 
