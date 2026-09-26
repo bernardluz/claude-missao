@@ -10,6 +10,7 @@
   "scripts": {
     "test": "node --test teste/*.test.mjs",
     "instalar": "node instalar.mjs",
-    "painel": "node painel/servidor.mjs"
+    "painel": "node painel/servidor.mjs",
+    "missao:codex": "node codex/rodar.mjs"
   }
 }

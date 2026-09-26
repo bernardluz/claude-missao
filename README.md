@@ -208,6 +208,37 @@ tenham só ferramentas de leitura. O agente padrão pode escrever e só obedece 
 O instalador recusa chave desconhecida e tipo errado. O formato de `revisoresPorPasta` é conferido quando o
 workflow roda.
 
+## Rodar no Codex
+
+O executor `codex/rodar.mjs` injeta `agent`, `parallel`, `phase`, `log` e `args` no mesmo JavaScript instalado que o Claude Code usa. Cada agente é um processo `codex exec`; não há skill `missao`, Traycer, painel nativo do Codex nem um segundo plano mantido em prompt. O painel existente deste repositório ainda lê somente registros do Claude.
+
+Requisitos: Node >= 20, Git, Codex CLI autenticado (no Windows, `codex.exe` no PATH), projeto Git e workflow atualizado por `node instalar.mjs <projeto>`. O `codex exec --help` precisa oferecer `--output-schema`, `--output-last-message`, `--sandbox`, `--ephemeral` e `--json`; o CLI também precisa de `--no-daemon`. Configuração, etapas e regras continuam compartilhadas nos arquivos `.claude` do projeto nesta versão.
+
+```powershell
+# argumentos.json contém { "spec": "docs/minha-spec.md" } ou { "milestones": [...] }
+node codex/rodar.mjs --projeto "C:/projetos/exemplo" --args "C:/temporario/argumentos.json"
+# Após uma parada normal, use o arquivo que o executor imprimiu:
+node codex/rodar.mjs --projeto "C:/projetos/exemplo" --retomar "C:/Users/eu/.codex/missoes/execucao-.../resultado.json"
+```
+
+Também disponível: `npm run missao:codex -- --help`. `--modelo` escolhe explicitamente um modelo Codex; sem ele, modelo e esforço seguem a configuração do CLI. Nomes/hints Claude como `haiku`, `sonnet` e `effort` não são repassados como seleção de modelo Codex. Papéis Markdown são procurados no projeto (`.codex/agents`, depois `.claude/agents`) e no usuário, nessa ordem. Frontmatter de ferramentas/modelo não vira permissão nativa; papel ausente para a execução em vez de remover a revisão.
+
+### Permissões e falhas
+
+O padrão é sandbox explícito e aprovação `never`. Revisão pura usa `read-only`; implementação, testes e commit usam `workspace-write`. Isso **não** garante permissão para escrever no Git ou rodar qualquer gate: se houver recusa, a missão para. Somente com autorização do operador, `--aprovacao auto` usa a revisão automática de permissões do Codex nos passos que escrevem, ainda sem `danger-full-access` ou bypass. As regras do usuário/projeto não são ignoradas.
+
+O limite `--concorrencia` (padrão 2, teto 6) vale para processos de agentes, não para callbacks de paralelismo. Cada processo tem `--timeout-ms` (padrão 30 minutos), entrada por stdin e stdout/stderr em arquivos. Não há retentativa silenciosa de erro do adaptador. Um `parallel` espera todos os irmãos iniciados antes de terminar.
+
+### Estado e recuperação
+
+Os registros ficam em `$CODEX_HOME/missoes` (ou `~/.codex/missoes`), fora do checkout; `--estado` muda essa pasta. Cada execução tem diretório exclusivo com entrada, eventos, estado, prompts/respostas dos agentes e resultado. Esses arquivos podem conter código e contexto privado: não publique a pasta de registros.
+
+Uma trava `missao-codex.lock` no diretório Git **do checkout** impede duas execuções, mesmo com pastas de estado diferentes. Não remover uma trava de outra execução. Timeout, cancelamento, resposta inválida ou saída anormal do CLI conservam a trava: podem existir efeitos parciais ou processos residuais. Inspecione o processo/checkout antes de remover manualmente a trava exata. Nenhum replay automático ocorre.
+
+Somente `resultado.json` de uma parada normal com `retomar`, mesmo projeto e mesmo hash do workflow, é aceito por `--retomar`; o núcleo confere branch e HEAD. `estado.json`, logs e uma execução morta não são checkpoints retomáveis. Revisar uma interrupção abrupta continua sendo tarefa humana; não inventar estado nem repetir commits.
+
+Códigos de saída: 0 concluído, 2 parada normal da missão, 1 erro do executor. Os testes locais usam um processo falso somente na fronteira do Codex e Git temporário real; não comprovam uma missão com modelo real. O smoke real de JSON comprova apenas CLI/modelo/schema, não implementação, revisão ou commit por agentes reais.
+
 ## Rodar
 
 Com o workflow instalado, peça ao Claude Code para rodar o workflow `missao` com `spec` ou com o

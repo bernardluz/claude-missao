@@ -87,5 +87,9 @@ Verificáveis por teste ou comando, incluindo a medição final.
 | Testes | | |
 ```
 
-Mostre a SPEC ao usuário. Aprovada, grave-a no projeto e rode o workflow `missao` com `{ "spec": "<caminho>", "modo":
-"enxugar" }`. O resultado traz `medicao` com o antes e o depois para preencher a última tabela.
+Aprovada a SPEC, grave-a no projeto. Os argumentos da missão são `{ "spec": "<caminho>", "modo": "enxugar" }`.
+
+- **Claude Code:** execute o workflow `missao` com esses argumentos.
+- **Codex:** grave esses argumentos em JSON e execute `node "{{CLAUDE_MISSAO}}/codex/rodar.mjs" --projeto "<raiz>" --args "<argumentos.json>"`.
+
+O projeto precisa da missão instalada por `instalar.mjs <projeto>`. No Codex, a aprovação padrão é `never`: uma operação que exige permissão faz a missão parar. Revisão automática de permissões (`--aprovacao auto`) exige autorização explícita; nunca usar bypass. Retome uma parada normal com `--retomar "<resultado.json>"`. O resultado traz `medicao` com antes e depois para preencher a tabela. Não trate logs de execução interrompida como resultado retomável.
