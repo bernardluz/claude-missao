@@ -1077,6 +1077,11 @@ const CONTRATO = {
         type: 'object',
         properties: {
           premissa: { type: 'string' }, evidencia: { type: 'string' }, confere: { type: 'boolean' }, pergunta: { type: 'string' },
+          // Premissa que não confere: decidido (correção óbvia no código, como contagem, número, nome ou caminho) ou
+          // bloqueante (muda comportamento ou contrato, ou envolve dinheiro, acesso ou dado sensível sem resposta).
+          classe: { type: 'string', enum: ['decidido', 'bloqueante'] },
+          valorReal: { type: 'string' },
+          feature: { type: 'string' },
         },
         required: ['premissa', 'confere'],
       },
@@ -1111,20 +1116,38 @@ const VEREDITO = {
 const AREAS_CACA = { type: 'object', properties: { areas: { type: 'array', items: { type: 'string' } } }, required: ['areas'] }
 
 // Antes de implementar: as premissas das features sobre o que o milestone não controla, conferidas no código do dono.
-// Premissa falsa para a missão com todas as perguntas juntas.
+// Premissa que não confere com correção óbvia (decidido, com o valor real) corrige a spec da feature, vira decisão
+// assumida e a missão segue; as bloqueantes param a missão com todas as perguntas juntas.
 async function provarContrato(m, aFazer) {
   const r = await comRetentativa(`contrato: ${m.titulo}`, () => trabalhar(montar('prova-de-contrato',
     `Milestone "${m.titulo}" (critério: ${m.criterio}). Features a implementar:\n` +
     aFazer.map(f => `- ${f.titulo}: ${f.spec}`).join('\n') + '\n\n' +
     'Liste as premissas que essas features fazem sobre outros serviços, módulos ou libs (rotas, campos, ids, ' +
     'comportamento) e confira cada uma no código do dono. Devolva cada premissa com a evidência (arquivo e linha), ' +
-    'confere=true ou false e, se ela não confere ou é ambígua, a pergunta objetiva para o usuário. Sem premissa ' +
-    'externa, devolva a lista vazia. Não escreva arquivos nem rode build: só leitura.\n' + GIT_PROIBIDO, guiasDe(m)),
+    'confere=true ou false. Premissa que não confere leva classe, feature (o título da feature afetada) e:\n' +
+    '- decidido: a divergência tem correção óbvia no código e não muda comportamento nem contrato (contagem, número, ' +
+    'nome, caminho, próxima versão livre de migration); devolva o valor certo em valorReal;\n' +
+    '- bloqueante: a divergência muda comportamento ou contrato, ou envolve dinheiro, acesso ou dado sensível sem ' +
+    'resposta no código; devolva a pergunta objetiva para o usuário. Na dúvida, o que toca dinheiro, acesso ou dado ' +
+    'sensível é bloqueante.\n' +
+    'Sem premissa externa, devolva a lista vazia. Não escreva arquivos nem rode build: só leitura.\n' + GIT_PROIBIDO, guiasDe(m)),
     { label: `contrato: ${m.titulo}`, phase: 'Contrato', agentType: comoAgente(CONFIG.leitor), schema: CONTRATO },
   ))
   if (!r) return { motivo: 'o agente da prova de contrato não respondeu' }
-  const falsas = r.premissas.filter(p => !p.confere)
-  if (!falsas.length) return null
+  const naoConferem = r.premissas.filter(p => !p.confere)
+  // Decidido sem valor real não tem com o que corrigir: conta como bloqueante.
+  const decididas = naoConferem.filter(p => p.classe === 'decidido' && String(p.valorReal ?? '').trim())
+  const falsas = naoConferem.filter(p => !decididas.includes(p))
+  const correcoes = {}
+  for (const p of decididas) {
+    const alvo = aFazer.some(f => f.titulo === p.feature) ? [p.feature] : aFazer.map(f => f.titulo)
+    const texto = `${p.premissa} → ${p.valorReal.trim()}`
+    for (const t of alvo) (correcoes[t] ??= []).push(texto)
+    const decisao = `contrato (${m.titulo}): ${texto}`
+    if (!decisoesAssumidas.includes(decisao)) decisoesAssumidas.push(decisao)
+  }
+  if (decididas.length) log(`${m.titulo}: ${decididas.length} premissa(s) corrigida(s) pelo valor real do código, para revisar no fim`)
+  if (!falsas.length) return { correcoes }
   return {
     motivo: `prova de contrato: ${falsas.length} premissa(s) do milestone não conferem no código do dono; responda as ` +
       'perguntas, ajuste o plano e retome (nada deste milestone foi implementado)',
@@ -1420,7 +1443,11 @@ for (const [i, m] of pendentes.entries()) {
 
   if (!m.suite && aFazer.length) {
     const e = await provarContrato(m, aFazer)
-    if (e) return pararAqui(e)
+    if (e.motivo) return pararAqui(e)
+    // A spec da feature leva o valor real que a prova de contrato achou no código.
+    for (const f of features) {
+      if (e.correcoes[f.titulo]) f.spec += `\nCorreção da prova de contrato (valor real no código): ${e.correcoes[f.titulo].join('; ')}`
+    }
     await desenharUi(m, aFazer)
   }
 
