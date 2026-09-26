@@ -818,9 +818,33 @@ async function implementar(features, fase) {
     let mensagem = r.mensagem
     for (const a of (r.naoSao ?? []).map(normalizar)) sujeiraVista.add(a)
     if (arquivos.size === 0) {
+      if (!r.jaResolvido) return falhou('worker não declarou arquivos alterados.' + sujo)
+      // Já resolvido, mas com mudança nova na árvore que não é sujeira alheia já vista: volta ao mesmo worker para
+      // declarar (e a feature segue para revisão e commit) ou desfazer, em vez de a sobra passar à próxima feature.
+      for (let t = 1; !arquivos.size; t++) {
+        const c = await lerGit(antes, fase)
+        if (!c) return falhou(`não foi possível ler o repositório depois de "${f.titulo}" voltar já resolvida${causaGit()}.${sujo}`)
+        const sobra = caminhosPendentes(c).filter(a => !sujeiraVista.has(a))
+        if (!sobra.length) break
+        if (t > MAX_RODADAS_REVISAO) {
+          return falhou(`"${f.titulo}" voltou já resolvida, mas deixou mudança nova na árvore: ${sobra.join(', ')}.${sujo}`)
+        }
+        log(`${f.titulo}: voltou já resolvida com mudança nova na árvore (${sobra.join(', ')}) → declarar ou desfazer`)
+        const ajuste = await comRetentativa(`${f.titulo} · sobra ${t}`, () => trabalhar(promptTrabalho(f,
+          `\nVocê devolveu jaResolvido=true sem arquivos, mas a árvore tem mudança nova: ${sobra.join(', ')}. Se for ` +
+          'desta feature, declare-as em arquivos (a feature segue para revisão e commit); se forem suas e não da ' +
+          'feature, desfaça só elas e devolva de novo jaResolvido=true; se não foi você, não mexa e liste-as em naoSao.'),
+          { label: `${f.titulo} · sobra ${t}`, phase: fase, schema: RESULTADO_FEATURE },
+        ))
+        if (!ajuste) return falhou(`agente de ajuste não retornou após ${MAX_RETENTATIVAS_INFRA + 1} tentativas.${sujo}`)
+        if (!ajuste.concluida) return falhou(ajuste.resumo + sujo)
+        for (const a of (ajuste.naoSao ?? []).map(normalizar)) sujeiraVista.add(a)
+        arquivos = new Set((ajuste.arquivos ?? []).map(normalizar))
+        if (ajuste.mensagem) mensagem = ajuste.mensagem
+      }
       // Já resolvido no código (ex.: feature que só confirma com teste o que já existe, e o teste já existe): conta
       // como concluída sem commit e segue. Feature original assim vira decisão assumida, para revisar no fim.
-      if (r.jaResolvido) {
+      if (!arquivos.size) {
         resultados.push({ feature: f.titulo, ...r, semCommit: true })
         if (fase !== 'Corrigir') {
           const decisao = `já resolvida no código (${f.titulo}): ${r.resumo ?? 'sem mudança'}`
@@ -829,7 +853,6 @@ async function implementar(features, fase) {
         }
         continue
       }
-      return falhou('worker não declarou arquivos alterados.' + sujo)
     }
 
     let anteriores = []
@@ -926,7 +949,9 @@ async function implementar(features, fase) {
       commits.push(...adotados)
       for (const a of arquivos) { arquivosDaMissao.add(a); arquivosDoMilestone.add(a) }
       const commit = pos.daFeature?.at(-1) ?? declarado
-      resultados.push({ feature: f.titulo, ...r, commit, ...(pos.daFeature?.length > 1 ? { commitsDaFeature: pos.daFeature } : {}), rodadasRevisao: rodada })
+      // Commitada, a feature não é "já resolvida", mesmo que o primeiro retorno do worker tenha dito isso.
+      const { jaResolvido: _, ...doWorker } = r
+      resultados.push({ feature: f.titulo, ...doWorker, commit, ...(pos.daFeature?.length > 1 ? { commitsDaFeature: pos.daFeature } : {}), rodadasRevisao: rodada })
       // Commitado, o diff da feature já não é pendência dela na retomada.
       arquivos = new Set()
     }
@@ -1476,7 +1501,7 @@ for (const [i, m] of pendentes.entries()) {
     }
   }
   // Scrutiny validator (a antiga validação): testes, lint, typecheck e revisão contra o critério, com correções.
-  const jaResolvidas = () => features.filter(f => feitas.some(x => x.feature === f.titulo && x.jaResolvido))
+  const jaResolvidas = () => features.filter(f => feitas.some(x => x.feature === f.titulo && x.jaResolvido && x.semCommit))
   const scrutiny = () => ateFechar(anteriores => validar(m, base, conf.arquivos, anteriores, jaResolvidas()))
 
   if (!m.suite && aFazer.length) {

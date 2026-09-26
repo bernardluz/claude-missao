@@ -75,6 +75,21 @@ describe('fluxo principal', () => {
     assert.equal(r.contar('testes: M1'), 2)
   })
 
+  test('já resolvida com mudança nova na árvore volta ao mesmo worker para declarar ou desfazer', async () => {
+    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true }, jaResolvidoSuja: { F1: true } })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('F1 · sobra 1'), 1)
+    assert.match(r.prompt('F1 · sobra 1'), /Você devolveu jaResolvido=true sem arquivos, mas a árvore tem mudança nova: x\/a\.js\. Se for desta feature, declare-as/)
+    assert.equal(r.contar('revisão: F1'), 1)
+    assert.equal(r.contar('commit: F1'), 1)
+    assert.equal(r.commits, 3)
+    assert.deepEqual(r.resultado.decisoesAssumidas, [])
+    const f1 = r.resultado.relatorio.flatMap(x => x.features ?? []).find(x => x.feature === 'F1')
+    assert.equal(f1.jaResolvido, undefined)
+    assert.ok(f1.commit)
+    assert.doesNotMatch(r.prompt('testes: M1'), /Estas features saíram sem commit/)
+  })
+
   test('worker sem arquivos declarados para logo', async () => {
     const r = await rodar(plano(), { semArquivos: true })
     assert.match(r.resultado.motivo, /não declarou arquivos/)

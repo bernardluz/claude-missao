@@ -27,6 +27,7 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   semArquivos        worker não declara arquivos
 //   jaResolvidoCorrecao correções voltam jaResolvido
 //   jaResolvidoFeature { [feature]: true } essa feature original volta jaResolvido, sem arquivos
+//   jaResolvidoSuja    { [feature]: true } essa feature volta jaResolvido, mas deixa o diff dela na árvore
 //   evidencias         [[{ feature, evidencia }] por rodada] o que o validador de testes do scrutiny prova
 //   branchNaConferencia branch devolvida pela conferência (simula troca de branch)
 //   commitDeFora       { [label]: sha } outra sessão commita os próprios arquivos logo depois desse agente
@@ -218,7 +219,10 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
     if (o.jaResolvidoCorrecao && opt.phase === 'Corrigir' && !l.includes('ajuste')) {
       return { concluida: true, jaResolvido: true, arquivos: [], resumo: 'já resolvido' }
     }
-    if (o.jaResolvidoFeature?.[l]) return { concluida: true, jaResolvido: true, arquivos: [], resumo: 'o teste já existe' }
+    if (o.jaResolvidoFeature?.[l]) {
+      if (o.jaResolvidoSuja?.[l]) estado.sujo = true
+      return { concluida: true, jaResolvido: true, arquivos: [], resumo: 'o teste já existe' }
+    }
     const daFeature = o.arquivosDaFeature?.[l.split(' · ')[0]]
     estado.sujo = daFeature ?? true
     const declarados = l.includes(' · ajuste ') ? o.arquivosAjuste ?? daFeature ?? arquivos : daFeature ?? arquivos
