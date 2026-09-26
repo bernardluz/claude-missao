@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
-import { instalar } from '../instalar.mjs'
+import { instalar, instalarGlobal } from '../instalar.mjs'
 
 const fixture = fileURLToPath(new URL('./fixtures/codex-falso.mjs', import.meta.url))
 const schema = { type: 'object', properties: {
@@ -30,7 +30,7 @@ async function agenteFalso(cenario = {}, extras = {}) {
   const registros = temp()
   const caso = join(registros, 'cenario.json')
   escrever(caso, cenario)
-  const agent = criarAgenteCodex({ projeto: registros, registros, comando: [process.execPath, fixture, caso], ...extras })
+  const agent = criarAgenteCodex({ modelo: 'modelo-teste', projeto: registros, registros, comando: [process.execPath, fixture, caso], ...extras })
   return { agent, registros }
 }
 
@@ -123,14 +123,14 @@ test('workflow instalado chega ao pré-voo pelo subprocesso e preserva parada/re
   const { raiz, git } = projeto()
   const estado = temp(), caso = join(estado, 'cenario.json')
   escrever(caso, { preVooBloqueado: true })
-  const opcoes = { projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] }
+  const opcoes = { modelo: 'modelo-teste', projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] }
   const r = await rodarMissao(opcoes)
   assert.equal(r.resultado.parouEm, 'pré-voo')
   assert.ok(r.resultado.retomar)
   assert.equal(ler(r.arquivoResultado).resultado.parouEm, 'pré-voo')
   assert.equal(git('status', '--porcelain'), '')
   const antes = readFileSync(r.arquivoResultado, 'utf8')
-  const retomada = await rodarMissao({ ...opcoes, args: undefined, retomar: r.arquivoResultado })
+  const retomada = await rodarMissao({ modelo: 'modelo-teste', ...opcoes, args: undefined, retomar: r.arquivoResultado })
   assert.notEqual(r.arquivoResultado, retomada.arquivoResultado)
   assert.equal(readFileSync(r.arquivoResultado, 'utf8'), antes)
   assert.equal(retomada.resultado.parouEm, 'pré-voo')
@@ -139,14 +139,14 @@ test('workflow instalado chega ao pré-voo pelo subprocesso e preserva parada/re
 test('runner recusa workflow adulterado, estado dentro do repo e retomada de outro projeto', async () => {
   const { rodarMissao } = await import('../codex/rodar.mjs')
   const { raiz } = projeto(), estado = temp()
-  await assert.rejects(rodarMissao({ projeto: raiz, args: argsMissao, pastaEstado: join(raiz, 'estado') }), /fora|repositório/i)
+  await assert.rejects(rodarMissao({ modelo: 'modelo-teste', projeto: raiz, args: argsMissao, pastaEstado: join(raiz, 'estado') }), /fora|repositório/i)
   writeFileSync(join(raiz, '.claude', 'workflows', 'missao.js'), 'throw new Error("nao executar")')
-  await assert.rejects(rodarMissao({ projeto: raiz, args: argsMissao, pastaEstado: estado }), /instal|desatualiz|workflow/i)
+  await assert.rejects(rodarMissao({ modelo: 'modelo-teste', projeto: raiz, args: argsMissao, pastaEstado: estado }), /instal|desatualiz|workflow/i)
   instalar(raiz, { forcar: true })
   const caso = join(estado, 'cenario.json'); escrever(caso, { preVooBloqueado: true })
-  const r = await rodarMissao({ projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] })
+  const r = await rodarMissao({ modelo: 'modelo-teste', projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] })
   const outro = projeto()
-  await assert.rejects(rodarMissao({ projeto: outro.raiz, retomar: r.arquivoResultado, pastaEstado: estado }), /projeto|checkout/i)
+  await assert.rejects(rodarMissao({ modelo: 'modelo-teste', projeto: outro.raiz, retomar: r.arquivoResultado, pastaEstado: estado }), /projeto|checkout/i)
 })
 
 test('lock do checkout bloqueia outra execução mesmo com outra pasta de estado e não é removido', async () => {
@@ -154,7 +154,7 @@ test('lock do checkout bloqueia outra execução mesmo com outra pasta de estado
   const { raiz, git } = projeto()
   const lock = join(git('rev-parse', '--absolute-git-dir'), 'missao-codex.lock')
   writeFileSync(lock, 'outro processo')
-  await assert.rejects(rodarMissao({ projeto: raiz, args: argsMissao, pastaEstado: temp() }), /lock|execução/i)
+  await assert.rejects(rodarMissao({ modelo: 'modelo-teste', projeto: raiz, args: argsMissao, pastaEstado: temp() }), /lock|execução/i)
   assert.equal(readFileSync(lock, 'utf8'), 'outro processo')
 })
 
@@ -162,7 +162,7 @@ test('saída anormal do CLI preserva diagnóstico e lock para inspeção', async
   const { rodarMissao } = await import('../codex/rodar.mjs')
   const { raiz, git } = projeto(), estado = temp()
   const caso = join(estado, 'cenario.json'); escrever(caso, { codigo: 9 })
-  await assert.rejects(rodarMissao({ projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] }), /Codex|código/i)
+  await assert.rejects(rodarMissao({ modelo: 'modelo-teste', projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] }), /Codex|código/i)
   assert.ok(existsSync(join(git('rev-parse', '--absolute-git-dir'), 'missao-codex.lock')))
   const pasta = readdirSync(estado).find(x => x.startsWith('execucao-'))
   assert.equal(ler(join(estado, pasta, 'estado.json')).status, 'erro')
@@ -231,13 +231,13 @@ test('retomada rejeita hash divergente e registro interrompido antes de iniciar 
   const { rodarMissao } = await import('../codex/rodar.mjs')
   const { raiz } = projeto(), estado = temp(), caso = join(estado, 'cenario.json')
   escrever(caso, { preVooBloqueado: true })
-  const opcoes = { projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] }
+  const opcoes = { modelo: 'modelo-teste', projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] }
   const r = await rodarMissao(opcoes)
   const registro = ler(r.arquivoResultado)
   const adulterado = join(estado, 'adulterado.json')
   escrever(adulterado, { ...registro, workflowHash: 'invalido' })
-  await assert.rejects(rodarMissao({ ...opcoes, args: undefined, retomar: adulterado }), /hash|retomada/i)
-  await assert.rejects(rodarMissao({ ...opcoes, args: undefined, retomar: join(r.pasta, 'estado.json') }), /retomada/i)
+  await assert.rejects(rodarMissao({ modelo: 'modelo-teste', ...opcoes, args: undefined, retomar: adulterado }), /hash|retomada/i)
+  await assert.rejects(rodarMissao({ modelo: 'modelo-teste', ...opcoes, args: undefined, retomar: join(r.pasta, 'estado.json') }), /retomada/i)
   assert.equal(readdirSync(estado).filter(x => x.startsWith('execucao-')).length, 1)
 })
 
@@ -246,21 +246,21 @@ test('CLI valida opções, projeto e uso sem iniciar modelo', async () => {
   assert.equal(await main(['--help']), 0)
   await assert.rejects(main([]), /informe/)
   await assert.rejects(main(['--opcao-desconhecida']), /Unknown|opção/i)
-  await assert.rejects(rodarMissao({ projeto: temp(), args: {}, retomar: 'x' }), /exatamente/)
+  await assert.rejects(rodarMissao({ modelo: 'modelo-teste', projeto: temp(), args: {}, retomar: 'x' }), /exatamente/)
   await assert.rejects(executarFluxo('não é workflow', {}, {}), /meta/)
   const { raiz } = projeto(), a = join(temp(), 'args.json')
   escrever(a, [])
-  await assert.rejects(main(['--projeto', raiz, '--args', a]), /objeto JSON/)
+  await assert.rejects(main(['--projeto', raiz, '--args', a, '--modelo', 'modelo-teste']), /objeto JSON/)
 })
 
 test('configuração inválida e falha de spawn não ganham fallback permissivo', async () => {
   const { criarAgenteCodex } = await import('../codex/agente.mjs')
   const registros = temp(), base = { projeto: registros, registros, comando: [process.execPath] }
-  assert.throws(() => criarAgenteCodex({ ...base, aprovacao: 'full' }), /aprovação/)
-  assert.throws(() => criarAgenteCodex({ ...base, concorrencia: 0 }), /concorrência/)
-  assert.throws(() => criarAgenteCodex({ ...base, timeoutMs: 0 }), /timeout/)
-  assert.throws(() => criarAgenteCodex({ ...base, comando: ['relativo.exe'] }), /absoluto/)
-  const agent = criarAgenteCodex({ ...base, comando: [join(registros, 'nao-existe.exe')] })
+  assert.throws(() => criarAgenteCodex({ modelo: 'modelo-teste', ...base, aprovacao: 'full' }), /aprovação/)
+  assert.throws(() => criarAgenteCodex({ modelo: 'modelo-teste', ...base, concorrencia: 0 }), /concorrência/)
+  assert.throws(() => criarAgenteCodex({ modelo: 'modelo-teste', ...base, timeoutMs: 0 }), /timeout/)
+  assert.throws(() => criarAgenteCodex({ modelo: 'modelo-teste', ...base, comando: ['relativo.exe'] }), /absoluto/)
+  const agent = criarAgenteCodex({ modelo: 'modelo-teste', ...base, comando: [join(registros, 'nao-existe.exe')] })
   await assert.rejects(agent('teste', { label: 'F1', phase: 'Implementar', schema }), /Codex não iniciou/)
   assert.equal((await agent.encerrar()).intervencaoManual, false)
 })
@@ -269,7 +269,7 @@ test('workflow instalado revisa e commita em Git temporário pelo CLI falso', as
   const { rodarMissao } = await import('../codex/rodar.mjs')
   const { raiz, git } = projeto(), estado = temp(), caso = join(estado, 'cenario.json')
   escrever(caso, { missaoSemMudancas: true })
-  const r = await rodarMissao({ projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] })
+  const r = await rodarMissao({ modelo: 'modelo-teste', projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] })
   assert.equal(r.resultado.concluido, true, JSON.stringify(r.resultado))
   assert.equal(ler(r.arquivoResultado).resultado.concluido, true)
   assert.equal(git('rev-list', '--count', 'HEAD'), '2')
@@ -296,7 +296,83 @@ test('junction de estado apontando ao checkout é recusada antes de criar qualqu
   const { rodarMissao } = await import('../codex/rodar.mjs')
   const { raiz, git } = projeto(), externa = temp(), alias = join(externa, 'alias')
   symlinkSync(raiz, alias, process.platform === 'win32' ? 'junction' : 'dir')
-  await assert.rejects(rodarMissao({ projeto: raiz, args: argsMissao, pastaEstado: join(alias, 'estado-indevido') }), /fora do repositório/)
+  await assert.rejects(rodarMissao({ modelo: 'modelo-teste', projeto: raiz, args: argsMissao, pastaEstado: join(alias, 'estado-indevido') }), /fora do repositório/)
   assert.ok(!existsSync(join(raiz, 'estado-indevido')))
   assert.equal(git('status', '--porcelain'), '')
+})
+
+test('modelo escolhido: adaptador exige resposta explícita antes de criar registros', async () => {
+  const { criarAgenteCodex } = await import('../codex/agente.mjs')
+  const raiz = temp(), registros = join(temp(), 'ainda-nao-criar')
+  for (const modelo of [undefined, null, '', '   ', 42, false]) {
+    assert.throws(() => criarAgenteCodex({
+      projeto: raiz, registros, modelo, comando: [process.execPath],
+    }), /Qual modelo você quer usar nesta missão\?/)
+    assert.ok(!existsSync(registros))
+  }
+})
+
+test('modelo escolhido: runner bloqueia ausência ou valor inválido sem lock ou execução', async () => {
+  const { rodarMissao } = await import('../codex/rodar.mjs')
+  const { raiz, git } = projeto(), estado = join(temp(), 'ainda-nao-criar')
+  const caso = join(temp(), 'cenario.json')
+  escrever(caso, { preVooBloqueado: true })
+  for (const modelo of [undefined, null, '', '   ', 42, false]) {
+    await assert.rejects(rodarMissao({
+      projeto: raiz, args: argsMissao, modelo, pastaEstado: estado,
+      comando: [process.execPath, fixture, caso],
+    }), /Qual modelo você quer usar nesta missão\?/)
+    assert.ok(!existsSync(estado))
+    assert.ok(!existsSync(join(raiz, '.git', 'missao-codex.lock')))
+  }
+  assert.equal(git('status', '--porcelain'), '')
+})
+
+test('modelo escolhido: retomada pergunta de novo e aceita escolha diferente sem herdar a antiga', async () => {
+  const { rodarMissao } = await import('../codex/rodar.mjs')
+  const { raiz } = projeto(), estado = temp(), caso = join(estado, 'cenario.json')
+  escrever(caso, { preVooBloqueado: true })
+  const base = { projeto: raiz, pastaEstado: estado, comando: [process.execPath, fixture, caso] }
+  const inicial = await rodarMissao({ ...base, args: argsMissao, modelo: 'modelo-anterior' })
+  assert.equal(ler(join(inicial.pasta, 'entrada.json')).modelo, 'modelo-anterior')
+  const anterior = readFileSync(inicial.arquivoResultado, 'utf8')
+  await assert.rejects(rodarMissao({ ...base, retomar: inicial.arquivoResultado }), /Qual modelo você quer usar nesta missão\?/)
+  assert.equal(readdirSync(estado).filter(x => x.startsWith('execucao-')).length, 1)
+  assert.ok(!existsSync(join(raiz, '.git', 'missao-codex.lock')))
+  const nova = await rodarMissao({ ...base, retomar: inicial.arquivoResultado, modelo: 'modelo-escolhido-agora' })
+  assert.equal(ler(join(nova.pasta, 'entrada.json')).modelo, 'modelo-escolhido-agora')
+  const agentes = join(nova.pasta, 'agentes')
+  for (const pasta of readdirSync(agentes)) {
+    const chamada = ler(join(agentes, pasta, 'captura.json'))
+    assert.equal(chamada.args.filter(x => x === '--model').length, 1)
+    assert.equal(chamada.args[chamada.args.indexOf('--model') + 1], 'modelo-escolhido-agora')
+    assert.ok(!chamada.args.includes('modelo-anterior'))
+  }
+  assert.equal(readFileSync(inicial.arquivoResultado, 'utf8'), anterior)
+})
+
+test('modelo escolhido: CLI pede modelo antes de ler projeto ou argumentos e mantém help livre', async () => {
+  const { main } = await import('../codex/rodar.mjs')
+  const raiz = join(temp(), 'nao-existe'), entrada = join(temp(), 'nao-existe.json')
+  for (const opcao of [[], ['--modelo', ''], ['--modelo', '   ']]) {
+    await assert.rejects(main(['--projeto', raiz, '--args', entrada, ...opcao]), /Qual modelo você quer usar nesta missão\?/)
+    await assert.rejects(main(['--projeto', raiz, '--retomar', entrada, ...opcao]), /Qual modelo você quer usar nesta missão\?/)
+  }
+  const runner = fileURLToPath(new URL('../codex/rodar.mjs', import.meta.url))
+  const ajuda = execFileSync(process.execPath, [runner, '--help'], { encoding: 'utf8' })
+  assert.match(ajuda, /--modelo <modelo>/)
+  assert.doesNotMatch(ajuda, /\[--modelo/)
+})
+
+test('modelo escolhido: skills instaladas perguntam e aguardam antes de iniciar ou retomar', () => {
+  const home = temp()
+  instalarGlobal({ home, repo: 'C:/fonte-teste', origem: '' })
+  for (const nome of ['criar-spec-simples', 'enxugar-codigo']) {
+    const texto = readFileSync(join(home, '.codex', 'skills', nome, 'SKILL.md'), 'utf8')
+    assert.match(texto, /Qual modelo você quer usar nesta missão\?/)
+    assert.match(texto, /Aguarde a resposta/)
+    assert.match(texto, /iniciar ou retomar/)
+    assert.ok((texto.match(/--modelo "<modelo-escolhido>"/g) ?? []).length >= 2)
+    assert.doesNotMatch(texto, /\{\{CLAUDE_MISSAO\}\}/)
+  }
 })
