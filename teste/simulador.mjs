@@ -54,7 +54,6 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   ui                 { [milestone]: texto } telas que o agente barato detecta (padrão: nenhuma)
 //   utUx               [[bool por problema] por rodada] quais falhas do user testing são de UX
 //   designLinks        links que o agente de UI/UX devolve
-//   foraImpacta     resposta do agente que julga commit de fora (padrão true: para como antes)
 //   conferenciaErro    texto de erro que o agente de conferência sempre devolve (ex.: erro do git)
 //   conferenciaResumida vezes que a conferência devolve só o último commit, com a contagem real
 //   conferenciaSemPorCommit vezes que a conferência omite arquivosPorCommit
@@ -105,7 +104,6 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       if (efeito === 'commitaOrfao') estado.git.push('orfao000')
       return null
     }
-    if (l === 'commit de fora') return { impacta: o.foraImpacta ?? true, motivo: 'julgado pelo agente' }
     if (l === 'contexto do plano') return { areas: o.areas ?? [] }
     if (l === 'simplicidade') return { ok: !o.perguntas && !o.cortes, perguntas: o.perguntas ?? [], cortes: o.cortes ?? [] }
     if (l === 'planejar') return { milestones: o.planoGerado ?? plano().milestones }

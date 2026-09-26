@@ -79,69 +79,58 @@ describe('conferência logo depois do commit', () => {
     assert.notEqual(f1, f2)
   })
 
-  test('commit de fora antes do commit da feature: para com o sha, e o retomar ajustado segue', async () => {
+  test('commit de fora que não toca a missão: aceito sem agente juiz, entra nos commits esperados e a missão segue', async () => {
     const estado = { git: ['base0000'], sujo: false }
-    const p1 = await rodar(plano(), { commitDeFora: { F2: 'fora0001' } }, estado)
-    assert.equal(p1.resultado.parouEm, 'M1')
-    assert.match(p1.resultado.motivo, /commit de fora da missão logo depois da feature "F2": fora0001\./)
-    assert.match(p1.resultado.motivo, /git rev-list --reverse <retomar\.base>\.\.HEAD/)
-    assert.match(p1.resultado.motivo, /e os SHAs de fora também em retomar\.deFora/)
-    assert.equal(p1.contar('revisão: M1'), 0)
-    const retomar = p1.resultado.retomar
-    assert.deepEqual(retomar.concluidas, ['F1', 'F2'])
-    assert.equal(retomar.head, estado.git.at(-1))
-    assert.equal(retomar.commits.length, 2)
-    // Sem ajuste, a retomada recusa: aceitar o commit de fora é decisão do usuário.
-    const semAjuste = await rodar(plano({ retomar }), {}, estado)
-    assert.match(semAjuste.resultado.motivo, /repositório mudou desde a parada/)
-    // Ajuste que o motivo ensina: commits reais do intervalo e HEAD real.
-    const p2 = await rodar(plano({ retomar: { ...retomar, commits: estado.git.slice(1), head: estado.git.at(-1) } }), {}, estado)
-    assert.equal(p2.resultado.concluido, true)
-    assert.equal(p2.contar('F1'), 0)
-    assert.equal(p2.contar('F2'), 0)
-    assert.equal(p2.contar('F3'), 1)
+    const r = await rodar(plano(), { commitDeFora: { F2: 'fora0001', 'testes: M2': 'fora0002' } }, estado)
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('commit de fora'), 0)
+    assert.ok(r.logs.some(l => l.startsWith('commit de fora aceito, não toca a missão: fora0001')))
+    assert.ok(r.logs.some(l => l.startsWith('commit de fora aceito, não toca a missão: fora0002')))
+    assert.equal(r.resultado.head, estado.git.at(-1))
+    assert.match(r.resultado.relatorio[1].commits, new RegExp(`\.\.${estado.git.at(-1)}$`))
+    assert.deepEqual(r.resultado.deForaTocando, [])
   })
 
-  test('commit de fora depois do commit da feature: motivo traz o sha e o HEAD real', async () => {
+  test('commit de fora depois do commit da feature: aceito e a missão segue', async () => {
     const estado = { git: ['base0000'], sujo: false }
     const r = await rodar(plano(), { commitDeFora: { 'commit: F1': 'fora0001' } }, estado)
-    assert.match(r.resultado.motivo, /"F1": fora0001\./)
-    assert.match(r.resultado.motivo, /retomar\.head o HEAD real, fora0001/)
-    assert.equal(r.resultado.retomar.head, estado.git.at(-2))
-    assert.deepEqual(r.resultado.retomar.concluidas, ['F1'])
-    assert.equal(r.contar('F2'), 0)
-  })
-
-  test('commit de fora durante a validação: a conferência do milestone traz o sha', async () => {
-    const r = await rodar(plano(), { commitDeFora: { 'testes: M1': 'fora0002' } })
-    assert.equal(r.resultado.parouEm, 'M1')
-    assert.match(r.resultado.motivo, /^após validação: commit de fora da missão em base0000\.\.HEAD: fora0002\./)
-  })
-
-  test('commit de fora que não impacta: aceito, entra nos commits esperados e a missão segue', async () => {
-    const estado = { git: ['base0000'], sujo: false }
-    const r = await rodar(plano(), { commitDeFora: { F2: 'fora0001', 'testes: M2': 'fora0002' }, foraImpacta: false }, estado)
     assert.equal(r.resultado.concluido, true)
-    assert.equal(r.contar('commit de fora'), 2)
-    const juiz = r.chamadas.find(c => c.label === 'commit de fora')
-    assert.equal(juiz.model, 'sonnet')
-    assert.equal(juiz.effort, 'low')
-    assert.match(juiz.prompt, /- fora0001: z\/fora\.js/)
-    assert.match(juiz.prompt, /Arquivos do milestone atual: x\/a\.js/)
-    assert.ok(r.logs.some(l => l.startsWith('commit de fora aceito, não impacta a missão: fora0001.')))
+    assert.equal(r.contar('F2'), 1)
     assert.equal(r.resultado.head, estado.git.at(-1))
-    assert.match(r.resultado.relatorio[1].commits, new RegExp(`\\.\\.${estado.git.at(-1)}$`))
   })
 
-  test('commit de fora que impacta para; se toca arquivo da missão, para sem consultar o agente', async () => {
-    const julgado = await rodar(plano(), { commitDeFora: { F2: 'fora0001' } })
-    assert.match(julgado.resultado.motivo, /"F2": fora0001\..*julgado pelo agente$/)
-    const tocando = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['x/a.js'], foraImpacta: false })
-    assert.match(tocando.resultado.motivo, /toca arquivo da missão: x\/a\.js$/)
-    assert.equal(tocando.contar('commit de fora'), 0)
+  test('commit de fora durante a validação: a conferência do milestone aceita e a missão segue', async () => {
+    const r = await rodar(plano(), { commitDeFora: { 'testes: M1': 'fora0002' } })
+    assert.equal(r.resultado.concluido, true)
+    assert.ok(r.logs.some(l => l.startsWith('commit de fora aceito, não toca a missão: fora0002')))
   })
 
-  test('commit de fora que leva o diff da feature: para com o sha, sem mandar descartar diff', async () => {
+  test('commit de fora que toca arquivo da missão: aceito, registrado e revisado no scrutiny e na caça', async () => {
+    const r = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['x/a.js'] })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('commit de fora'), 0)
+    assert.ok(r.logs.some(l => /^commit de fora aceito, toca a missão: fora0001\. .*x\/a\.js/.test(l)))
+    assert.deepEqual(r.resultado.deForaTocando, [{ milestone: 'M1', commits: ['fora0001'], arquivos: ['x/a.js'] }])
+    const revise = /Arquivos da missão tocados por commit de fora: x\/a\.js \(fora0001\)\. Revise-os/
+    for (const label of ['revisão: M1', 'testes: M1', 'caça: geral (M1, rodada 1)', 'caça: interação entre milestones (final, rodada 1)', 'suíte completa']) {
+      assert.match(r.prompt(label), revise, label)
+    }
+    // Só o milestone em que o commit de fora apareceu revisa esses arquivos; o fim da missão revisa todos.
+    assert.doesNotMatch(r.prompt('revisão: M2'), revise)
+  })
+
+  test('commit de fora que leva o diff da feature: a feature conta como concluída e a missão segue', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const r = await rodar(plano(), { commitDeForaTudo: { 'revisão: F1': 'fora0001' }, arquivosDeFora: ['x/a.js'] }, estado)
+    assert.equal(r.resultado.concluido, true)
+    assert.ok(r.logs.some(l => l.startsWith('commit de fora levou o diff da feature "F1": fora0001')))
+    assert.equal(r.contar('F1'), 1)
+    assert.deepEqual(r.resultado.relatorio[0].features.map(x => x.feature), ['F1', 'F2'])
+    assert.deepEqual(r.resultado.deForaTocando[0], { milestone: 'M1', commits: ['fora0001'], arquivos: ['x/a.js'] })
+    assert.equal(r.commits, 3)
+  })
+
+  test('diff da feature sumiu sem ir para o commit de fora: para como antes, sem mandar descartar diff', async () => {
     const r = await rodar(plano(), { commitDeForaTudo: { 'revisão: F1': 'fora0001' } })
     assert.match(r.resultado.motivo, /não commitou \(nada a commitar\), e base0000\.\.HEAD tem commit de fora da missão: fora0001,/)
     assert.match(r.resultado.motivo, /inclua também "F1" em retomar\.concluidas/)
@@ -150,7 +139,7 @@ describe('conferência logo depois do commit', () => {
   })
 
   test('commit de fora com o diff da feature ainda na árvore: a parada lembra do diff', async () => {
-    const r = await rodar(plano(), { commitDeFora: { 'revisão: F1': 'fora0001' }, falhaCommit: { F1: 'index.lock existe' } })
+    const r = await rodar(plano(), { commitDeFora: { 'revisão: F1': 'fora0001' }, arquivosDeFora: ['x/a.js'], falhaCommit: { F1: 'index.lock existe' } })
     assert.match(r.resultado.motivo, /não commitou \(index\.lock existe\), e base0000\.\.HEAD tem commit de fora da missão: fora0001,/)
     assert.match(r.resultado.motivo, /O diff da feature ficou sem commit/)
   })
@@ -891,29 +880,40 @@ describe('caça final e aceite', () => {
 })
 
 describe('revisão: retomada e commits de fora', () => {
-  test('na retomada, commit de fora que toca arquivo de milestone anterior para, sem consultar o agente', async () => {
+  test('na retomada, commit de fora que toca arquivo de milestone anterior é aceito e revisado no fim da missão', async () => {
     const estado = { git: ['base0000'], sujo: false }
     const p1 = await rodar(plano(), { validacao: [0, 2, 2] }, estado)
     assert.equal(p1.resultado.parouEm, 'M2')
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {
-      commitDeFora: { 'revisão: M2': 'fora0001' }, arquivosDeFora: ['x/a.js'], foraImpacta: false,
+      commitDeFora: { 'revisão: M2': 'fora0001' }, arquivosDeFora: ['x/a.js'],
     }, estado)
-    assert.equal(p2.resultado.parouEm, 'M2')
-    assert.match(p2.resultado.motivo, /toca arquivo da missão: x\/a\.js$/)
+    assert.equal(p2.resultado.concluido, true)
     assert.equal(p2.contar('commit de fora'), 0)
+    assert.ok(p2.logs.some(l => /^commit de fora aceito, toca a missão: fora0001\. .*x\/a\.js/.test(l)))
+    assert.match(p2.prompt('suíte completa'), /Arquivos da missão tocados por commit de fora: x\/a\.js \(fora0001\)\. Revise-os/)
     assert.match(p2.prompt('conferência'), /git-estado\.mjs base0000 --resumo sha\d{5}`/)
+  })
+
+  test('commit de fora que toca a missão vai no retomar e volta ao scrutiny do milestone na retomada', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(plano(), { commitDeFora: { F3: 'fora0001' }, arquivosDeFora: ['x/a.js'], validacao: [0, 2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'M2')
+    assert.deepEqual(p1.resultado.retomar.deForaTocando, [{ milestone: 'M2', commits: ['fora0001'], arquivos: ['x/a.js'] }])
+    const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.match(p2.prompt('revisão: M2'), /Arquivos da missão tocados por commit de fora: x\/a\.js \(fora0001\)\. Revise-os/)
   })
 
   test('commit de fora aceito vai no retomar e não conta como arquivo da missão na retomada', async () => {
     const estado = { git: ['base0000'], sujo: false }
-    const p1 = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['z/fora.js'], foraImpacta: false, validacao: [0, 2, 2] }, estado)
+    const p1 = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['z/fora.js'], validacao: [0, 2, 2] }, estado)
     assert.equal(p1.resultado.parouEm, 'M2')
     assert.deepEqual(p1.resultado.retomar.deFora, ['fora0001'])
     const p2 = await rodar(plano({ retomar: p1.resultado.retomar }), {
-      commitDeFora: { 'revisão: M2': 'fora0002' }, arquivosDeFora: ['z/fora.js'], foraImpacta: false,
+      commitDeFora: { 'revisão: M2': 'fora0002' }, arquivosDeFora: ['z/fora.js'],
     }, estado)
     assert.equal(p2.resultado.concluido, true)
-    assert.equal(p2.contar('commit de fora'), 1)
+    assert.ok(p2.logs.some(l => l.startsWith('commit de fora aceito, não toca a missão: fora0002')))
     // A retomada lê a missão no modo compacto do script, passando os commits de fora já aceitos.
     assert.match(p2.prompt('conferência'), /git-estado\.mjs base0000 --resumo sha\d{5} fora0001`/)
   })
@@ -922,7 +922,7 @@ describe('revisão: retomada e commits de fora', () => {
 describe('revisão: commit de fora aceito fica fora do escopo', () => {
   test('arquivos do commit de fora não entram no revisor por pasta, nas áreas de caça nem nas correções', async () => {
     const r = await rodarCom(CONFIG_EXEMPLO, plano(), {
-      arquivos: ['services/a.kt'], commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['web/y.ts'], foraImpacta: false,
+      arquivos: ['services/a.kt'], commitDeFora: { F2: 'fora0001' }, arquivosDeFora: ['web/y.ts'],
       validacao: [1, 0],
     })
     assert.equal(r.resultado.concluido, true)
@@ -1015,7 +1015,7 @@ describe('revisão: bug só conta como corrigido depois da correção', () => {
 
 describe('revisão: suíte final e commits de fora', () => {
   test('a suíte recebe os commits de fora aceitos e o pedido de não corrigir o código deles', async () => {
-    const r = await rodar(plano(), { commitDeFora: { F2: 'fora0001' }, foraImpacta: false })
+    const r = await rodar(plano(), { commitDeFora: { F2: 'fora0001' } })
     assert.equal(r.resultado.concluido, true)
     assert.match(r.prompt('suíte completa'), /Os commits fora0001 são de fora da missão: não peça correção do código deles/)
     const sem = await rodar(plano())
