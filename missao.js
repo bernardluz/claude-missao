@@ -198,6 +198,11 @@ const VALIDACAO = {
   properties: {
     aprendizados: APRENDIZADOS,
     aprovado: { type: 'boolean' },
+    // Validador de testes: evidência (teste ou arquivo:linha) de cada feature que saiu como já resolvida no código.
+    evidencias: {
+      type: 'array',
+      items: { type: 'object', properties: { feature: { type: 'string' }, evidencia: { type: 'string' } }, required: ['feature', 'evidencia'] },
+    },
     problemas: {
       type: 'array',
       items: {
@@ -1045,7 +1050,9 @@ async function validarSuite(anteriores) {
 }
 
 // Dois validadores independentes sobre os commits do milestone, como os 2 runs da Factory.
-async function validar(m, base, arquivos, anteriores) {
+// jaResolvidas: features do milestone que saíram sem commit como já resolvidas no código; o validador de testes prova
+// cada uma com teste ou arquivo:linha, e a que fica sem evidência vira problema do loop de correção.
+async function validar(m, base, arquivos, anteriores, jaResolvidas = []) {
   if (m.suite) return validarSuite(anteriores)
   const intervalo = `${base}..${head}`
   const memoria = anteriores.length
@@ -1061,14 +1068,24 @@ async function validar(m, base, arquivos, anteriores) {
     )),
     () => comRetentativa(`testes: ${m.titulo}`, () => trabalhar(montar('scrutiny',
       `Rode, no HEAD atual, os testes focados que cobrem os commits ${intervalo} do milestone "${m.titulo}"${semDeFora()} ` +
-      `e confira o critério: ${m.criterio}.${reviseDeFora(m.titulo)} Não altere código. Reporte falhas com a saída relevante.` + memoria +
+      `e confira o critério: ${m.criterio}.${reviseDeFora(m.titulo)} Não altere código. Reporte falhas com a saída relevante.` +
+      (jaResolvidas.length
+        ? '\nEstas features saíram sem commit, como já resolvidas no código. Para cada uma, devolva em evidencias a ' +
+          'prova concreta (o teste que a cobre, ou arquivo:linha) que você conferiu; sem prova, não a inclua:\n' +
+          jaResolvidas.map(f => `- ${f.titulo}: ${f.spec}`).join('\n')
+        : '') + memoria +
       '\n' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, guiasDe(m)),
       { label: `testes: ${m.titulo}`, phase: 'Scrutiny', schema: VALIDACAO },
     )),
   ])
   if (!revisao || !testes) return { erro: 'um validador não respondeu' }
-  const problemas = [...revisao.problemas, ...testes.problemas]
-  const aprovado = revisao.aprovado && testes.aprovado
+  const provadas = new Set((testes.evidencias ?? []).filter(e => String(e.evidencia ?? '').trim()).map(e => e.feature))
+  const semEvidencia = jaResolvidas.filter(f => !provadas.has(f.titulo)).map(f => ({
+    problema: `a feature "${f.titulo}" saiu como já resolvida no código, sem evidência (teste ou arquivo:linha) de que ` +
+      `cumpre a spec: ${f.spec}. Entregue o que falta, ou o teste que a comprova`,
+  }))
+  const problemas = [...revisao.problemas, ...testes.problemas, ...semEvidencia]
+  const aprovado = revisao.aprovado && testes.aprovado && !semEvidencia.length
   if (!aprovado && problemas.length === 0) return { erro: 'validação reprovou sem apontar problemas' }
   return { aprovado, problemas }
 }
@@ -1459,7 +1476,8 @@ for (const [i, m] of pendentes.entries()) {
     }
   }
   // Scrutiny validator (a antiga validação): testes, lint, typecheck e revisão contra o critério, com correções.
-  const scrutiny = () => ateFechar(anteriores => validar(m, base, conf.arquivos, anteriores))
+  const jaResolvidas = () => features.filter(f => feitas.some(x => x.feature === f.titulo && x.jaResolvido))
+  const scrutiny = () => ateFechar(anteriores => validar(m, base, conf.arquivos, anteriores, jaResolvidas()))
 
   if (!m.suite && aFazer.length) {
     const e = await provarContrato(m, aFazer)

@@ -54,15 +54,25 @@ describe('fluxo principal', () => {
   })
 
   test('feature original já resolvida no código conta como concluída sem commit, vira decisão assumida e segue', async () => {
-    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true } })
+    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true }, evidencias: [[{ feature: 'F1', evidencia: 'teste/f1.test.mjs:10' }]] })
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.commits, 2)
+    assert.match(r.prompt('testes: M1'), /Estas features saíram sem commit, como já resolvidas no código\. .*\n- F1: /)
+    assert.doesNotMatch(r.prompt('testes: M2'), /Estas features saíram sem commit/)
     assert.equal(r.contar('revisão: F1'), 0)
     assert.equal(r.contar('commit: F1'), 0)
     assert.deepEqual(r.resultado.decisoesAssumidas, ['já resolvida no código (F1): o teste já existe'])
     const f1 = r.resultado.relatorio.flatMap(x => x.features ?? []).find(x => x.feature === 'F1')
     assert.equal(f1.jaResolvido, true)
     assert.equal(f1.semCommit, true)
+  })
+
+  test('feature já resolvida sem evidência no scrutiny vira problema e segue o loop de correção', async () => {
+    const r = await rodar(plano(), { jaResolvidoFeature: { F1: true }, evidencias: [[], [{ feature: 'F1', evidencia: 'teste/f1.test.mjs:10' }]] })
+    assert.equal(r.resultado.concluido, true)
+    assert.equal(r.contar('correção 1.1 (M1)'), 1)
+    assert.match(r.prompt('correção 1.1 (M1)'), /a feature "F1" saiu como já resolvida no código, sem evidência \(teste ou arquivo:linha\)/)
+    assert.equal(r.contar('testes: M1'), 2)
   })
 
   test('worker sem arquivos declarados para logo', async () => {

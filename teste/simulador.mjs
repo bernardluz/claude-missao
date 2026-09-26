@@ -27,6 +27,7 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   semArquivos        worker não declara arquivos
 //   jaResolvidoCorrecao correções voltam jaResolvido
 //   jaResolvidoFeature { [feature]: true } essa feature original volta jaResolvido, sem arquivos
+//   evidencias         [[{ feature, evidencia }] por rodada] o que o validador de testes do scrutiny prova
 //   branchNaConferencia branch devolvida pela conferência (simula troca de branch)
 //   commitDeFora       { [label]: sha } outra sessão commita os próprios arquivos logo depois desse agente
 //   commitDeForaTudo   { [label]: sha } outra sessão faz `git commit -a` logo depois desse agente e leva o diff
@@ -80,6 +81,7 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
   let resumida = o.conferenciaResumida ?? 0
   let semPorCommit = o.conferenciaSemPorCommit ?? 0
   let rodadaValidacao = 0
+  let rodadaTestes = 0
   let rodadaSuite = 0
   const rodadaUT = {}
   let rodadaAceite = 0
@@ -178,7 +180,10 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       return { aprovado: n === 0, problemas: problemas(n, 'u').map((p, j) => (o.utUx?.[i]?.[j] ? { ...p, ux: true } : p)) }
     }
     if (opt.phase === 'Scrutiny') {
-      if (l.startsWith('testes: ')) return { aprovado: true, problemas: [] }
+      if (l.startsWith('testes: ')) {
+        const ev = (o.evidencias ?? [])[rodadaTestes++]
+        return { aprovado: true, problemas: [], ...(ev ? { evidencias: ev } : {}) }
+      }
       const n = (o.validacao ?? [])[rodadaValidacao++] ?? 0
       return { aprovado: n === 0, problemas: problemas(n, 'v') }
     }
