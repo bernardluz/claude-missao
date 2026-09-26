@@ -70,7 +70,7 @@ etapa como "Aprendizados do projeto"; mudou, reinstale (`--verificar` acusa).
 Como vai em todo prompt, o arquivo precisa de curadoria: junte repetidos, corte o que envelheceu e mantenha só
 técnica e armadilha durável. O instalador avisa, sem falhar, quando ele passa de 60 linhas.
 
-**SPEC simples.** A skill `criar-spec-simples`, instalada no projeto, orienta o agente principal a
+**SPEC simples.** A skill `criar-spec-simples`, instalada no global, orienta o agente principal a
 escrever a SPEC na conversa, antes da missão: quem usa, fluxo em cliques, cada peça com uso real,
 cortes explícitos e critérios de aceite verificáveis.
 
@@ -140,7 +140,23 @@ Para pegar um código que já existe e cortá-lo ao modelo mínimo, com os mesmo
 Referência: um serviço financeiro saiu de 23 mil linhas, 34 tabelas e 6 fluxos de mensageria para 3,8 mil linhas,
 6 tabelas e nenhuma fila.
 
-## Instalar num projeto
+## Instalar
+
+A missão tem duas partes: as skills, uma vez por máquina, e o workflow, em cada projeto.
+
+**Skills no global** (Claude e Codex):
+
+```bash
+node instalar.mjs --global      # grava ou atualiza as skills
+node instalar.mjs --verificar   # sai com código 1 se estiverem desatualizadas
+```
+
+Isso grava `missao-traycer`, `criar-spec-simples` e `enxugar-codigo` em `~/.claude/skills/` e
+`~/.codex/skills/`, substituindo cópias antigas. Na hora de instalar, o caminho deste repositório e a URL do
+`origin` entram no texto de cada skill, com uma seção "Atualizar a missão" que ensina a pegar atualização.
+Nada da máquina fica versionado aqui. Projeto não guarda cópia das skills.
+
+**Workflow num projeto:**
 
 1. **Opcional:** crie `.claude/missao.config.json` no projeto. Veja [configuração](#configuração)
    e o exemplo em [`exemplos/brivae.config.json`](exemplos/brivae.config.json).
@@ -150,10 +166,9 @@ Referência: um serviço financeiro saiu de 23 mil linhas, 34 tabelas e 6 fluxos
    node instalar.mjs ../meu-projeto
    ```
 
-   Isso grava no projeto:
-   - `.claude/workflows/missao.js`, com a configuração e a técnica de cada etapa embutidas;
-   - `.claude/missao/git-estado.mjs`, o script que a conferência roda;
-   - as skills `.claude/skills/missao-traycer/`, `.claude/skills/criar-spec-simples/` e `.claude/skills/enxugar-codigo/`.
+   Isso grava no projeto só:
+   - `.claude/workflows/missao.js`, com a configuração, a técnica de cada etapa e os aprendizados embutidos;
+   - `.claude/missao/git-estado.mjs`, o script que a conferência roda.
 
    Versione esses arquivos e a configuração no projeto. O complemento das etapas, se houver, fica em
    `.claude/missao/etapas/`.
@@ -237,8 +252,10 @@ O título `Suíte final` é reservado. Se a missão parar na suíte final, a ret
 
 ## No Traycer: skill `missao-traycer`
 
-O instalador também grava `.claude/skills/missao-traycer/SKILL.md` no projeto. A skill segue o mesmo
-fluxo e as mesmas garantias, mas usa agentes e artefatos do Traycer em vez do Workflow:
+A skill `missao-traycer` fica no global (veja [Instalar](#instalar)). Ela lê as técnicas das etapas e o
+`git-estado.mjs` deste repositório, e a configuração do projeto atual; se o projeto não tiver a missão instalada,
+ela manda instalar. Segue o mesmo fluxo e as mesmas garantias, mas usa agentes e artefatos do Traycer em vez do
+Workflow:
 
 | Workflow `missao` | Skill `missao-traycer` |
 |---|---|
