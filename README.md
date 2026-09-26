@@ -16,6 +16,7 @@ Contexto      → contexto do plano por área, gerado UMA vez e reaproveitado na
 
 Para cada milestone:
   Prova de contrato → premissas sobre outros serviços conferidas no código do dono; falsa PARA
+  UI/UX             → só com tela: desenha telas e fluxos com checklist de UX, sem esperar aprovação
   Para cada feature, em série:
     implementa (sem commit) → revisão independente → ajustes até aprovar → commit atômico → conferência
   Scrutiny ⇄ Corrigir   (testes, lint, typecheck e revisão contra o critério)
@@ -34,6 +35,19 @@ problemas demais.
 
 A caça bug para quando uma rodada não confirma nada, no teto `maxRodadasCaca` ou quando um bug
 já corrigido é confirmado de novo (este último para a missão pedindo decisão).
+
+### UI/UX
+
+Em milestone com tela, depois da prova de contrato e antes de implementar, um agente desenha as telas e fluxos. Usa a
+skill `/design`, a `impeccable` ou o Artifact de design quando disponível e devolve os links; senão, o desenho em
+texto, por tela. O checklist de UX fica em `etapas/ui-ux.md`: nunca pedir ID ou UUID digitado (sempre seletor
+pesquisável), pontos de entrada nas telas relacionadas, estados de carregando, vazio, erro e sucesso, confirmação em ação
+destrutiva, linguagem do usuário, acessibilidade e componentes do design system.
+
+A etapa **nunca para a missão** esperando aprovação. O desenho vai para implementar, correção, revisão (achado grave de
+UX, como pedir ID na mão, bloqueia o commit) e user testing, que registra os desvios. Ele vai no `retomar` e, no fim,
+em `resultado.designs` (por milestone: links, texto e desvios). O usuário revisa no fim e, se não gostar, roda o
+design à parte.
 
 ### Etapas e skills
 
@@ -191,7 +205,7 @@ descartável `missao-teste/`.
 | `args` | Padrão | |
 |---|---|---|
 | `spec` | — | SPEC (caminho ou texto); obrigatório se não houver plano |
-| `milestones` | — | `[{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }]`, com títulos únicos. `caca`: áreas de caça-bug (sem ela, um agente barato as deriva dos arquivos tocados). `userTesting`: a jornada que um usuário percorre |
+| `milestones` | — | `[{ titulo, criterio, caca?, userTesting?, ui?, features: [{ titulo, spec }] }]`, com títulos únicos. `caca`: áreas de caça-bug (sem ela, um agente barato as deriva dos arquivos tocados). `userTesting`: a jornada que um usuário percorre. `ui`: as telas e fluxos do milestone (sem ela, um agente barato detecta se há tela) |
 | `plano` | — | `{ milestones }`, o mesmo que `milestones` |
 | `aceite` | — | Critérios de aceite. Sem eles, a seção de aceite da SPEC ou os critérios dos milestones |
 | `maxRodadasCaca` | 3 | Teto de rodadas de caça bug por milestone |

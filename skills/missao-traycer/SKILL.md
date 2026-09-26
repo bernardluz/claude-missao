@@ -31,7 +31,7 @@ Valem para você e para todo filho, em qualquer passo:
 ## Entrada
 
 O plano vem do usuário, de um artefato do epic ou de `args`:
-`milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }]`, com títulos únicos. `caca`
+`milestones: [{ titulo, criterio, caca?, userTesting?, ui?, features: [{ titulo, spec }] }]`, com títulos únicos. `caca`
 são as áreas de caça-bug do milestone; `userTesting`, a jornada que um usuário percorre.
 
 Também pode vir só a `spec` (caminho ou texto). Nesse caso, antes de tudo:
@@ -111,6 +111,11 @@ para levar ao `AGENTS.md` da área.
 Antes das features de cada milestone, a **prova de contrato**: um filho só-leitura lista as premissas das features
 sobre outros serviços ou módulos (rotas, campos, ids, comportamento) e confere cada uma no código do dono. Premissa
 que não confere: pare com todas as perguntas juntas, antes de implementar.
+
+Depois, em milestone com tela (`ui` no plano, ou tela que você identifica nas features), a **UI/UX**: um filho desenha
+as telas e fluxos com a técnica e o checklist de `ui-ux` (use `/design`, `impeccable` ou o Artifact de design se houver;
+senão, texto por tela). Não pare esperando aprovação. Grave o desenho em `estado/`, passe-o ao implementador, ao
+revisor (achado grave de UX, como pedir ID digitado, é bloqueante) e ao user testing, e mostre-o ao usuário no fim.
 
 ### 3. Cada feature, em série
 
