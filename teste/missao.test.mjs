@@ -1418,35 +1418,41 @@ describe('retomada com commit de fora em arquivo da missão', () => {
 })
 
 describe('prova de contrato decide o trivial', () => {
-  const comUmMilestone = () => ({ milestones: [{ titulo: 'M1', criterio: 'c', features: [{ titulo: 'F1', spec: 's' }, { titulo: 'F2', spec: 's' }] }] })
+  const comUmMilestone = () => ({ milestones: [{ titulo: 'M1', criterio: 'c', features: [{ titulo: 'F1', spec: 's' }, { titulo: 'F2', spec: 'Decisão confirmada: V71' }] }] })
 
-  test('premissa trivial que não confere corrige a feature com o valor real, vira decisão assumida e segue', async () => {
+  test('contagem de chamadas que não confere corrige só a feature indicada, vira decisão assumida e segue', async () => {
     const contratoFalso = { M1: [
       { premissa: '18 call sites de pagar()', confere: false, classe: 'decidido', valorReal: '20 call sites', feature: 'F1' },
-      { premissa: 'próxima migration V71', confere: false, classe: 'decidido', valorReal: 'V70' },
     ] }
     const r = await rodar(comUmMilestone(), { contratoFalso })
     assert.equal(r.resultado.concluido, true)
-    assert.match(r.prompt('F1'), /Correção da prova de contrato \(valor real no código\): 18 call sites de pagar\(\) → 20 call sites; próxima migration V71 → V70/)
-    // Sem feature apontada, a correção vai para todas as do milestone.
-    assert.match(r.prompt('F2'), /Correção da prova de contrato \(valor real no código\): próxima migration V71 → V70/)
-    assert.doesNotMatch(r.prompt('F2'), /call sites/)
-    assert.deepEqual(r.resultado.decisoesAssumidas, ['contrato (M1): 18 call sites de pagar() → 20 call sites', 'contrato (M1): próxima migration V71 → V70'])
-    assert.match(r.prompt('contrato: M1'), /decidido: a divergência tem correção óbvia no código e não muda comportamento nem contrato/)
-    assert.match(r.prompt('contrato: M1'), /Na dúvida, o que toca dinheiro, acesso ou dado sensível é bloqueante/)
+    assert.match(r.prompt('F1'), /Correção da prova de contrato \(valor real no código\): 18 call sites de pagar\(\) → 20 call sites/)
+    assert.doesNotMatch(r.prompt('F2'), /Correção da prova de contrato/)
+    assert.deepEqual(r.resultado.decisoesAssumidas, ['contrato (M1): 18 call sites de pagar() → 20 call sites'])
   })
 
-  test('bloqueante, ou decidido sem valor real, para com as perguntas; as decididas vão junto nas decisões', async () => {
+  test('prompt do provador traz o plano e a SPEC e manda escolha nova e decisão explícita para bloqueante', async () => {
+    const r = await rodar({ spec: 'docs/spec.md', plano: { milestones: comUmMilestone().milestones } })
+    const p = r.prompt('contrato: M1')
+    assert.match(p, /Plano do milestone "M1" \(critério: c\)\. Features a implementar:\n- F1: s\n- F2: Decisão confirmada: V71/)
+    assert.match(p, /SPEC \(texto, ou caminho de arquivo no repositório para ler inteiro\):\ndocs\/spec\.md/)
+    assert.match(p, /decidido: só fato descritivo de código que JÁ existe no dono/)
+    assert.match(p, /bloqueante: escolha para código novo \(número de migration, nome de tabela ou rota nova, contrato novo\), o que o plano ou a SPEC marca como decisão/)
+    assert.doesNotMatch(p, /próxima versão livre de migration/)
+  })
+
+  test('migration, decidido sem feature ou sem valor real e bloqueante param com as perguntas juntas', async () => {
     const contratoFalso = { M1: [
+      { premissa: 'próxima migration V71', confere: false, classe: 'decidido', valorReal: 'V70', feature: 'F2', pergunta: 'V71 ou V70?' },
       { premissa: 'GET /contas devolve saldo', confere: false, classe: 'bloqueante', pergunta: 'o saldo vem de onde?' },
-      { premissa: 'campo idConta', confere: false, classe: 'decidido' },
+      { premissa: 'campo idConta', confere: false, classe: 'decidido', feature: 'F1' },
       { premissa: '3 telas', confere: false, classe: 'decidido', valorReal: '4 telas' },
     ] }
     const r = await rodar(comUmMilestone(), { contratoFalso })
     assert.equal(r.resultado.parouEm, 'M1')
-    assert.match(r.resultado.motivo, /prova de contrato: 2 premissa\(s\)/)
-    assert.deepEqual(r.resultado.perguntas, ['o saldo vem de onde?', 'confirmar: campo idConta'])
-    assert.deepEqual(r.resultado.decisoesAssumidas, ['contrato (M1): 3 telas → 4 telas'])
+    assert.match(r.resultado.motivo, /prova de contrato: 4 premissa\(s\)/)
+    assert.deepEqual(r.resultado.perguntas, ['V71 ou V70?', 'o saldo vem de onde?', 'confirmar: campo idConta', 'confirmar: 3 telas'])
+    assert.deepEqual(r.resultado.decisoesAssumidas, [])
     assert.equal(r.contar('F1'), 0)
   })
 })

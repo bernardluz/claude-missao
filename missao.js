@@ -1116,33 +1116,38 @@ const VEREDITO = {
 const AREAS_CACA = { type: 'object', properties: { areas: { type: 'array', items: { type: 'string' } } }, required: ['areas'] }
 
 // Antes de implementar: as premissas das features sobre o que o milestone não controla, conferidas no código do dono.
-// Premissa que não confere com correção óbvia (decidido, com o valor real) corrige a spec da feature, vira decisão
-// assumida e a missão segue; as bloqueantes param a missão com todas as perguntas juntas.
+// Premissa que não confere e é só fato descritivo de código que já existe (decidido, com o valor real e a feature)
+// corrige a spec dessa feature, vira decisão assumida e a missão segue. Escolha para código novo, decisão explícita do
+// plano ou da SPEC e divergência de comportamento, contrato ou risco param a missão com todas as perguntas juntas.
 async function provarContrato(m, aFazer) {
   const r = await comRetentativa(`contrato: ${m.titulo}`, () => trabalhar(montar('prova-de-contrato',
-    `Milestone "${m.titulo}" (critério: ${m.criterio}). Features a implementar:\n` +
+    // O provador enxerga o plano do milestone e a SPEC, onde ficam as decisões explícitas que ele não pode trocar.
+    `Plano do milestone "${m.titulo}" (critério: ${m.criterio}${m.ui ? `; telas: ${m.ui}` : ''}). Features a implementar:\n` +
     aFazer.map(f => `- ${f.titulo}: ${f.spec}`).join('\n') + '\n\n' +
+    (SPEC ? `${SPEC_NO_PROMPT()}\n\n` : '') +
     'Liste as premissas que essas features fazem sobre outros serviços, módulos ou libs (rotas, campos, ids, ' +
     'comportamento) e confira cada uma no código do dono. Devolva cada premissa com a evidência (arquivo e linha), ' +
-    'confere=true ou false. Premissa que não confere leva classe, feature (o título da feature afetada) e:\n' +
-    '- decidido: a divergência tem correção óbvia no código e não muda comportamento nem contrato (contagem, número, ' +
-    'nome, caminho, próxima versão livre de migration); devolva o valor certo em valorReal;\n' +
-    '- bloqueante: a divergência muda comportamento ou contrato, ou envolve dinheiro, acesso ou dado sensível sem ' +
-    'resposta no código; devolva a pergunta objetiva para o usuário. Na dúvida, o que toca dinheiro, acesso ou dado ' +
-    'sensível é bloqueante.\n' +
+    'confere=true ou false. Premissa que não confere leva classe, feature (o título exato da feature afetada) e:\n' +
+    '- decidido: só fato descritivo de código que JÁ existe no dono, sem mudar comportamento nem contrato (contagem ' +
+    'de chamadas, caminho, nome atual de símbolo ou campo existente); devolva o valor real em valorReal;\n' +
+    '- bloqueante: escolha para código novo (número de migration, nome de tabela ou rota nova, contrato novo), o que ' +
+    'o plano ou a SPEC marca como decisão ("Decisão", "confirmado", "Decisões já fechadas"), divergência que muda ' +
+    'comportamento ou contrato, ou que envolve dinheiro, acesso ou dado sensível sem resposta no código; devolva a ' +
+    'pergunta objetiva para o usuário. Na dúvida, bloqueante.\n' +
     'Sem premissa externa, devolva a lista vazia. Não escreva arquivos nem rode build: só leitura.\n' + GIT_PROIBIDO, guiasDe(m)),
     { label: `contrato: ${m.titulo}`, phase: 'Contrato', agentType: comoAgente(CONFIG.leitor), schema: CONTRATO },
   ))
   if (!r) return { motivo: 'o agente da prova de contrato não respondeu' }
   const naoConferem = r.premissas.filter(p => !p.confere)
-  // Decidido sem valor real não tem com o que corrigir: conta como bloqueante.
-  const decididas = naoConferem.filter(p => p.classe === 'decidido' && String(p.valorReal ?? '').trim())
+  // Só é decidida a premissa com valor real e feature certa; migration nunca é, porque o número é escolha do plano.
+  const ehMigration = p => /\bV\d+\b|migra/i.test(`${p.premissa} ${p.valorReal ?? ''}`)
+  const decididas = naoConferem.filter(p => p.classe === 'decidido' && String(p.valorReal ?? '').trim() &&
+    aFazer.some(f => f.titulo === p.feature) && !ehMigration(p))
   const falsas = naoConferem.filter(p => !decididas.includes(p))
   const correcoes = {}
   for (const p of decididas) {
-    const alvo = aFazer.some(f => f.titulo === p.feature) ? [p.feature] : aFazer.map(f => f.titulo)
     const texto = `${p.premissa} → ${p.valorReal.trim()}`
-    for (const t of alvo) (correcoes[t] ??= []).push(texto)
+    ;(correcoes[p.feature] ??= []).push(texto)
     const decisao = `contrato (${m.titulo}): ${texto}`
     if (!decisoesAssumidas.includes(decisao)) decisoesAssumidas.push(decisao)
   }
