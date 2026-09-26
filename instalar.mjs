@@ -3,7 +3,7 @@
 // configuração embutida em CONFIG_PROJETO, a técnica de cada etapa (etapas/ + .claude/missao/etapas/ do projeto) em
 // ETAPAS e os aprendizados do projeto (.claude/missao/aprendizados.md) em APRENDIZADOS_PROJETO. Copia também o script
 // de estado do git que a conferência roda.
-// Global: copia as skills de SKILLS para ~/.claude/skills e ~/.codex/skills, com o caminho deste repositório e a URL
+// Global: copia as skills de SKILLS (não a missao-traycer) para ~/.claude/skills e ~/.codex/skills, com o caminho deste repositório e a URL
 // do origin injetados na hora, e a seção "Atualizar a missão".
 //
 // Uso:
@@ -12,7 +12,7 @@
 //   node instalar.mjs <caminho-do-projeto> --forcar     substitui um missao.js que não foi gerado pelo instalador
 //   node instalar.mjs --global                          instala ou atualiza as skills no Claude e no Codex
 //   node instalar.mjs --verificar                       sai com código 1 se as skills globais estiverem desatualizadas
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, rmdirSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -21,8 +21,9 @@ import { execFileSync } from 'node:child_process'
 const aqui = dirname(fileURLToPath(import.meta.url))
 export const NUCLEO = join(aqui, 'missao.js')
 // Skills globais (Claude e Codex), nunca copiadas para o projeto.
-export const SKILLS = ['missao-traycer', 'criar-spec-simples', 'enxugar-codigo'].map(nome => [nome, join(aqui, 'skills', nome, 'SKILL.md')])
-export const SKILL = SKILLS[0][1]
+export const SKILLS = ['criar-spec-simples', 'enxugar-codigo'].map(nome => [nome, join(aqui, 'skills', nome, 'SKILL.md')])
+// Fica só no repositório: não vai para o global. Cópia global antiga dela, gerada por este instalador, é removida.
+export const FORA_DO_GLOBAL = ['missao-traycer']
 // Arquivos copiados como estão para o projeto: origem no claude-missao → destino relativo à raiz do projeto. Cada um
 // traz a marca MARCA_COPIA, para o instalador não sobrescrever uma versão mantida à mão.
 export const COPIAS = [
@@ -63,7 +64,8 @@ export function skillGlobal(texto, repo = aqui, origem = origemRemota()) {
   return `${lf(texto).replaceAll(MARCADOR_REPO, caminho).trimEnd()}\n\n${secaoAtualizar(caminho, origem)}`
 }
 export function instalarGlobal({ verificar = false, home = homedir(), repo = aqui, origem = origemRemota() } = {}) {
-  const copias = [join(home, '.claude', 'skills'), join(home, '.codex', 'skills')].flatMap(base =>
+  const bases = [join(home, '.claude', 'skills'), join(home, '.codex', 'skills')]
+  const copias = bases.flatMap(base =>
     SKILLS.map(([nome, origemSkill]) => ({ destino: join(base, nome, 'SKILL.md'), conteudo: skillGlobal(readFileSync(origemSkill, 'utf8'), repo, origem) })))
   const destinos = copias.map(c => c.destino)
   if (verificar) return { destinos, atualizado: copias.every(c => lerLf(c.destino) === c.conteudo) }
@@ -71,7 +73,15 @@ export function instalarGlobal({ verificar = false, home = homedir(), repo = aqu
     mkdirSync(dirname(c.destino), { recursive: true })
     writeFileSync(c.destino, c.conteudo)
   }
-  return { destinos }
+  // Skill que saiu do global: remove só a cópia que traz a marca do instalador; a pasta vai junto se ficar vazia.
+  const removidos = []
+  for (const arquivo of bases.flatMap(base => FORA_DO_GLOBAL.map(nome => join(base, nome, 'SKILL.md')))) {
+    if (!existsSync(arquivo) || !readFileSync(arquivo, 'utf8').includes(MARCA_COPIA)) continue
+    rmSync(arquivo)
+    if (!readdirSync(dirname(arquivo)).length) rmdirSync(dirname(arquivo))
+    removidos.push(arquivo)
+  }
+  return { destinos, removidos }
 }
 
 // Técnica de cada etapa: etapas/<etapa>.md no claude-missao. O projeto complementa em .claude/missao/etapas/<etapa>.md;
@@ -197,7 +207,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         console.log(r.atualizado ? 'skills globais atualizadas' : `skills globais desatualizadas ou ausentes: ${r.destinos.join(', ')}`)
         process.exit(r.atualizado ? 0 : 1)
       }
-      console.log(`skills instaladas: ${r.destinos.join(', ')}`)
+      console.log(`skills instaladas: ${r.destinos.join(', ')}${r.removidos.length ? `; removidas: ${r.removidos.join(', ')}` : ''}`)
       process.exit(0)
     }
     if (opcoes.includes('--verificar')) {

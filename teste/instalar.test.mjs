@@ -265,15 +265,14 @@ test('instalação por projeto não grava skills: só missao.js e git-estado.mjs
   assert.equal(instalar(raiz, { verificar: true }).atualizado, true)
 })
 
-test('--global grava as 3 skills no Claude e no Codex, com o caminho e o origin injetados, e substitui cópia antiga', () => {
+test('--global grava criar-spec-simples e enxugar-codigo no Claude e no Codex, com caminho e origin injetados', () => {
   const home = mkdtempSync(join(tmpdir(), 'missao-home-'))
-  const antiga = join(home, '.claude', 'skills', 'missao-traycer', 'SKILL.md')
-  mkdirSync(dirname(antiga), { recursive: true })
-  writeFileSync(antiga, 'cópia antiga\n')
   const repo = 'C:/repos/claude-missao'
   const r = instalarGlobal({ home, repo, origem: 'https://example.test/claude-missao.git' })
-  assert.equal(r.destinos.length, 6)
+  assert.equal(r.destinos.length, 4)
+  assert.deepEqual(SKILLS.map(([nome]) => nome), ['criar-spec-simples', 'enxugar-codigo'])
   for (const base of ['.claude', '.codex']) {
+    assert.equal(existsSync(join(home, base, 'skills', 'missao-traycer')), false, base)
     for (const [nome] of SKILLS) {
       const texto = readFileSync(join(home, base, 'skills', nome, 'SKILL.md'), 'utf8')
       assert.match(texto, new RegExp(`^---\\nname: ${nome}\\n`), `${base} ${nome}`)
@@ -284,11 +283,22 @@ test('--global grava as 3 skills no Claude e no Codex, com o caminho e o origin 
       assert.match(texto, /`node "C:\/repos\/claude-missao\/instalar\.mjs" <projeto> --verificar`; se estiver desatualizado,\n {3}`node "C:\/repos\/claude-missao\/instalar\.mjs" <projeto>`/)
     }
   }
-  const traycer = readFileSync(antiga, 'utf8')
-  assert.match(traycer, /node "C:\/repos\/claude-missao\/git-estado\.mjs" <base>/)
-  assert.match(traycer, /`C:\/repos\/claude-missao\/etapas\/<etapa>\.md`/)
-  assert.match(traycer, /Se não tiver, instale antes de começar:\n`node "C:\/repos\/claude-missao\/instalar\.mjs" <raiz do projeto>`/)
-  assert.match(traycer, /Leia `\.claude\/missao\.config\.json` do projeto atual/)
+})
+
+test('--global remove a missao-traycer do global só quando a cópia tem a marca do instalador', () => {
+  const home = mkdtempSync(join(tmpdir(), 'missao-home-'))
+  const marcada = join(home, '.claude', 'skills', 'missao-traycer', 'SKILL.md')
+  const manual = join(home, '.codex', 'skills', 'missao-traycer', 'SKILL.md')
+  for (const [arquivo, texto] of [[marcada, 'Instalada pelo `claude-missao` no global\n'], [manual, 'minha versão\n']]) {
+    mkdirSync(dirname(arquivo), { recursive: true })
+    writeFileSync(arquivo, texto)
+  }
+  const r = instalarGlobal({ home, repo: 'C:/r', origem: '' })
+  assert.deepEqual(r.removidos, [marcada])
+  assert.equal(existsSync(dirname(marcada)), false)
+  assert.equal(readFileSync(manual, 'utf8'), 'minha versão\n')
+  // A ausência dela não deixa o global desatualizado.
+  assert.equal(instalarGlobal({ home, repo: 'C:/r', origem: '', verificar: true }).atualizado, true)
 })
 
 test('--verificar sem projeto confere as skills globais', () => {
