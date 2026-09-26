@@ -118,10 +118,12 @@ para levar ao `AGENTS.md` da área.
 Antes das features de cada milestone, a **prova de contrato**: um filho só-leitura lista as premissas das features
 sobre outros serviços ou módulos (rotas, campos, ids, comportamento) e confere cada uma no código do dono. Premissa
 que não confere e é só fato descritivo de código que já existe (contagem de chamadas, caminho, nome atual de símbolo
-ou campo): corrija a feature indicada com o valor real, grave como decisão assumida em `estado/` e siga. Escolha
-para código novo (número de migration, tabela ou rota nova, contrato novo), o que o plano ou a SPEC marca como
-decisão, divergência que muda comportamento ou contrato, ou que envolve dinheiro, acesso ou dado sensível sem
-resposta: pare com todas as perguntas juntas, antes de implementar. Passe ao filho o plano do milestone e a SPEC.
+ou campo): corrija a feature indicada com o valor real, grave como decisão assumida em `estado/` e siga. O que o
+plano ou a SPEC marca como decisão não é premissa a provar: siga a decisão. Escolha para código novo (número de
+migration, tabela ou rota nova, contrato novo) que o plano não fixou, conflito concreto no código com uma decisão do
+plano (ex.: já existe arquivo com o mesmo número de migration), divergência que muda comportamento ou contrato, ou
+que envolve dinheiro, acesso ou dado sensível sem resposta: pare com todas as perguntas juntas, antes de
+implementar. Passe ao filho o plano do milestone e a SPEC.
 
 Depois, em milestone com tela (`ui` no plano, ou tela que você identifica nas features), a **UI/UX**: um filho desenha
 as telas e fluxos com a técnica e o checklist de `ui-ux` (use `/design`, `impeccable` ou o Artifact de design se houver;
