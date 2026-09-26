@@ -3,11 +3,12 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
 const [caso, ...args] = process.argv.slice(2)
-const c = JSON.parse(readFileSync(caso, 'utf8'))
+let c = JSON.parse(readFileSync(caso, 'utf8'))
 const valor = flag => args[args.indexOf(flag) + 1]
 const saida = valor('--output-last-message')
 const schema = JSON.parse(readFileSync(valor('--output-schema'), 'utf8'))
 const pedido = JSON.parse(readFileSync(join(dirname(saida), 'pedido.json'), 'utf8'))
+c = { ...c, ...(c.porLabel?.[pedido.opcoes.label] ?? {}) }
 const inicio = Date.now()
 let prompt = ''
 for await (const chunk of process.stdin) prompt += chunk

@@ -191,3 +191,76 @@ test('parallel espera o irmão terminar antes de propagar erro', async () => {
   await assert.rejects(executarFluxo(fonte, {}, { agent }), /fronteira falhou/)
   assert.equal(finalizado, true)
 })
+
+test('drenagem conserva intervenção manual mesmo se a primeira falha foi uma recusa simples', async () => {
+  const { agent } = await agenteFalso({ porLabel: {
+    recusa: { bloqueado: true, motivo: 'permissão negada' },
+    falha: { demoraMs: 220, codigo: 9 },
+  } }, { concorrencia: 2 })
+  const r = await Promise.allSettled(['recusa', 'falha'].map(label => agent('teste', { label, phase: 'Implementar', schema })))
+  assert.ok(r.every(x => x.status === 'rejected'))
+  assert.equal((await agent.encerrar()).intervencaoManual, true)
+})
+
+test('schema conserva valores falsy e valida tipos/limites escalares sem coerção', async () => {
+  const { normalizarResultado, schemaEstrito } = await import('../codex/schema.mjs')
+  for (const [valor, s] of [[false, { type: 'boolean' }], ['', { type: 'string' }], [0, { type: 'integer' }], [0.5, { type: 'number' }], [null, { type: 'null' }], [[], { type: 'array', items: { type: 'string' }, minItems: 0 }]]) {
+    assert.deepEqual(normalizarResultado(valor, s), valor)
+  }
+  assert.throws(() => normalizarResultado(1, { type: 'null' }), /contrato/)
+  assert.throws(() => normalizarResultado(Infinity, { type: 'number' }), /contrato/)
+  assert.throws(() => normalizarResultado('b', { type: 'string', enum: ['a'] }), /contrato/)
+  assert.throws(() => normalizarResultado([], { type: 'array', items: { type: 'string' }, minItems: 1 }), /contrato/)
+  assert.throws(() => schemaEstrito({ type: 'object' }), /schema/)
+  assert.throws(() => schemaEstrito({ type: 'object', properties: {}, required: ['ausente'] }), /schema/)
+})
+
+test('papel Claude fallback é lido; revisão não recebe auto-review mesmo quando worker recebe', async () => {
+  const { agent, registros } = await agenteFalso({ resultado: { ok: true } }, { aprovacao: 'auto' })
+  mkdirSync(join(registros, '.claude', 'agents'), { recursive: true })
+  writeFileSync(join(registros, '.claude', 'agents', 'reviewer.md'), 'REVISOR_FALLBACK')
+  await agent('revisar', { label: 'revisão: F1', phase: 'Scrutiny', schema, agentType: 'reviewer' })
+  const pasta = readdirSync(registros).find(x => x.startsWith('agente-'))
+  const captura = ler(join(registros, pasta, 'captura.json'))
+  assert.match(captura.prompt, /REVISOR_FALLBACK/)
+  assert.ok(!captura.args.includes('--approve-for-me'))
+  assert.equal(captura.args[captura.args.indexOf('--sandbox') + 1], 'read-only')
+})
+
+test('retomada rejeita hash divergente e registro interrompido antes de iniciar agente', async () => {
+  const { rodarMissao } = await import('../codex/rodar.mjs')
+  const { raiz } = projeto(), estado = temp(), caso = join(estado, 'cenario.json')
+  escrever(caso, { preVooBloqueado: true })
+  const opcoes = { projeto: raiz, args: argsMissao, pastaEstado: estado, comando: [process.execPath, fixture, caso] }
+  const r = await rodarMissao(opcoes)
+  const registro = ler(r.arquivoResultado)
+  const adulterado = join(estado, 'adulterado.json')
+  escrever(adulterado, { ...registro, workflowHash: 'invalido' })
+  await assert.rejects(rodarMissao({ ...opcoes, args: undefined, retomar: adulterado }), /hash|retomada/i)
+  await assert.rejects(rodarMissao({ ...opcoes, args: undefined, retomar: join(r.pasta, 'estado.json') }), /retomada/i)
+  assert.equal(readdirSync(estado).filter(x => x.startsWith('execucao-')).length, 1)
+})
+
+test('CLI valida opções, projeto e uso sem iniciar modelo', async () => {
+  const { main, rodarMissao, executarFluxo } = await import('../codex/rodar.mjs')
+  assert.equal(await main(['--help']), 0)
+  await assert.rejects(main([]), /informe/)
+  await assert.rejects(main(['--opcao-desconhecida']), /Unknown|opção/i)
+  await assert.rejects(rodarMissao({ projeto: temp(), args: {}, retomar: 'x' }), /exatamente/)
+  await assert.rejects(executarFluxo('não é workflow', {}, {}), /meta/)
+  const { raiz } = projeto(), a = join(temp(), 'args.json')
+  escrever(a, [])
+  await assert.rejects(main(['--projeto', raiz, '--args', a]), /objeto JSON/)
+})
+
+test('configuração inválida e falha de spawn não ganham fallback permissivo', async () => {
+  const { criarAgenteCodex } = await import('../codex/agente.mjs')
+  const registros = temp(), base = { projeto: registros, registros, comando: [process.execPath] }
+  assert.throws(() => criarAgenteCodex({ ...base, aprovacao: 'full' }), /aprovação/)
+  assert.throws(() => criarAgenteCodex({ ...base, concorrencia: 0 }), /concorrência/)
+  assert.throws(() => criarAgenteCodex({ ...base, timeoutMs: 0 }), /timeout/)
+  assert.throws(() => criarAgenteCodex({ ...base, comando: ['relativo.exe'] }), /absoluto/)
+  const agent = criarAgenteCodex({ ...base, comando: [join(registros, 'nao-existe.exe')] })
+  await assert.rejects(agent('teste', { label: 'F1', phase: 'Implementar', schema }), /Codex não iniciou/)
+  assert.equal((await agent.encerrar()).intervencaoManual, false)
+})
