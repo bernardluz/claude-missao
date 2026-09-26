@@ -461,7 +461,8 @@ if (!milestones) {
     '- decidido: tem sugestão e é técnico ou de desenho interno; a missão segue com a sugestão, sem perguntar;\n' +
     '- bloqueante: decisão de produto ou de risco (dinheiro, acesso, dado sensível) que nem a SPEC nem o código ' +
     'respondem, ou corte que remove algo que a SPEC pede explicitamente.\n' +
-    'Na dúvida entre as duas, e com sugestão segura, decidido. Sem nada, itens vazio. Não escreva arquivos nem rode ' +
+    'Na dúvida, item que envolve dinheiro, acesso ou autorização, ou dado sensível é bloqueante; os demais, com ' +
+    'sugestão segura, são decididos. Sem nada, itens vazio. Não escreva arquivos nem rode ' +
     'build: só leitura.\n' + GIT_PROIBIDO),
     { label: 'simplicidade', phase: 'Simplicidade', agentType: comoAgente(CONFIG.leitor), schema: SIMPLICIDADE },
   ))

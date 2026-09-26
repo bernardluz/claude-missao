@@ -8,4 +8,6 @@ Compare a SPEC com o código atual antes de qualquer plano.
   - decidido: técnico ou de desenho interno; a missão segue com a sugestão e o usuário revisa no fim;
   - bloqueante: decisão de produto ou de risco (dinheiro, acesso, dado sensível) que nem a SPEC nem o código
     respondem, ou corte de algo que a SPEC pede explicitamente. Só esse para a missão.
+- Na dúvida entre as duas, risco decide: item que toca dinheiro, acesso ou autorização, ou dado sensível é bloqueante;
+  os demais, com sugestão segura, são decididos.
 - Não escreva código nem arquivos.

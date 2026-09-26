@@ -635,6 +635,8 @@ describe('spec, planejamento e pré-voo', () => {
     assert.match(r.prompt('simplicidade'), /SPEC \(texto, ou caminho de arquivo no repositório para ler inteiro\):\ndocs\/spec\.md/)
     assert.match(r.prompt('simplicidade'), /bloqueante: decisão de produto ou de risco \(dinheiro, acesso, dado sensível\)/)
     assert.match(r.prompt('simplicidade'), /corte que remove algo que a SPEC pede explicitamente/)
+    assert.match(r.prompt('simplicidade'), /Na dúvida, item que envolve dinheiro, acesso ou autorização, ou dado sensível é bloqueante; os demais, com sugestão segura, são decididos/)
+    assert.doesNotMatch(r.prompt('simplicidade'), /Na dúvida entre as duas, e com sugestão segura, decidido/)
   })
 
   test('simplicidade só com itens decididos não para: as decisões vão ao planejador, ao resultado e ao retomar', async () => {
