@@ -38,16 +38,11 @@ O plano vem do usuário, de um artefato do epic ou de `args`:
 `milestones: [{ titulo, criterio, caca?, userTesting?, ui?, features: [{ titulo, spec }] }]`, com títulos únicos. `caca`
 são as áreas de caça-bug do milestone; `userTesting`, a jornada que um usuário percorre.
 
-Também pode vir só a `spec` (caminho ou texto). Nesse caso, antes de tudo:
-1. **Simplicidade.** Um filho só-leitura compara a SPEC com o código e devolve perguntas e cortes, cada um com
-   sugestão e classe. Decidido (técnico ou de desenho interno, com sugestão): siga com a sugestão, grave-a em
-   `estado/` como decisão assumida e mostre-a ao usuário no fim. Bloqueante (produto ou risco sem resposta na SPEC
-   nem no código; na dúvida, o que toca dinheiro, acesso ou dado sensível): pare e mostre todos juntos, sem
-   escrever código.
-2. **Planejar.** Aprovada, um filho só-leitura gera o plano no formato acima. Grave-o em `estado/`: a retomada não
-   replaneja.
+Também pode vir só a `spec` (caminho ou texto), já conferida na conversa pela skill `criar-spec-simples`. Nesse
+caso, antes de tudo, um filho só-leitura gera o plano no formato acima. Grave-o em `estado/`: a retomada não
+replaneja.
 
-A técnica curta de cada etapa (`verificar-simplicidade`, `planejar`, `pre-voo`, `prova-de-contrato`,
+A técnica curta de cada etapa (`planejar`, `pre-voo`, `prova-de-contrato`,
 `implementar`, `revisar`, `scrutiny`, `corrigir`, `caca-bug`, `user-testing`, `aceite`) está em
 `{{CLAUDE_MISSAO}}/etapas/<etapa>.md`, com o complemento do projeto em `.claude/missao/etapas/<etapa>.md`, se existir.
 Passe a da etapa no briefing do filho correspondente.

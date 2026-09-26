@@ -1,10 +1,9 @@
 export const meta = {
   name: 'missao',
   description: 'Executa uma SPEC ou um plano em milestones: features em série com commit atômico, validação, caça bug e correções, parando se não fechar',
-  whenToUse: 'Trabalho grande em milestones e features (estilo Factory Missions). Passe o plano em args.milestones, ou a SPEC em args.spec para a missão conferir a simplicidade e planejar; para retomar, passe em args.retomar o objeto devolvido na parada. Agente pulado é retentado: use maxRetentativasInfra 0 para evitar.',
+  whenToUse: 'Trabalho grande em milestones e features (estilo Factory Missions). Passe o plano em args.milestones, ou a SPEC já aprovada em args.spec para a missão planejar; para retomar, passe em args.retomar o objeto devolvido na parada. Agente pulado é retentado: use maxRetentativasInfra 0 para evitar.',
   phases: [
     { title: 'Preparar', detail: 'confere árvore limpa, branch e HEAD base pelo script de estado do git' },
-    { title: 'Simplicidade', detail: 'só com spec: confere a simplicidade da SPEC; pergunta ou corte para a missão' },
     { title: 'Planejar', detail: 'só com spec: gera o plano em milestones, que volta no retomar' },
     { title: 'Pré-voo', detail: 'confere se o ambiente roda testes e suíte antes de qualquer commit' },
     { title: 'Contexto', detail: 'contexto do plano por área, gerado uma vez e reaproveitado na retomada' },
@@ -24,11 +23,11 @@ export const meta = {
 // projeto embutida em CONFIG_PROJETO; edite no repositório claude-missao, não na cópia instalada.
 //
 // args: { milestones: [{ titulo, criterio, caca?, userTesting?, features: [{ titulo, spec }] }] } (ou plano: { milestones })
-//       ou { spec } (texto ou caminho da SPEC: a missão confere a simplicidade e gera o plano), mais
+//       ou { spec } (texto ou caminho da SPEC, já conferida pela skill criar-spec-simples: a missão gera o plano), mais
 //       maxRodadasCorrecao?, maxProblemasPorRodada?, maxRodadasRevisao?, maxFeaturesPorMilestone?, maxRetentativasInfra?,
 //       maxRodadasCaca?, aceite?, modo? ('enxugar': cortar código que já existe; também pelo marcador na SPEC), retomar?,
 //       config?
-// Etapas: [simplicidade e plano, só com spec] → pré-voo → contexto do plano → por milestone: prova de contrato,
+// Etapas: [plano, só com spec] → pré-voo → contexto do plano → por milestone: prova de contrato,
 // features (implementa → revisão independente → commit atômico conferido), scrutiny ⇄ correções, caça bug ⇄ correções,
 // user testing ⇄ correções → caça final entre milestones → suíte completa ⇄ correções → aceite.
 // O git é lido pelo script git-estado.mjs, nunca pela interpretação de um modelo. Commit de outra sessão nunca para a
@@ -219,30 +218,6 @@ const VALIDACAO = {
   required: ['aprovado', 'problemas'],
 }
 
-// Cada pergunta ou corte vem classificado: decidido (tem sugestão e é técnico ou de desenho interno; a missão segue com
-// ela) ou bloqueante (produto ou risco sem resposta na SPEC nem no código; só esse para a missão).
-const SIMPLICIDADE = {
-  type: 'object',
-  properties: {
-    aprendizados: APRENDIZADOS,
-    itens: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          tipo: { type: 'string', enum: ['pergunta', 'corte'] },
-          texto: { type: 'string' },
-          sugestao: { type: 'string' },
-          classe: { type: 'string', enum: ['decidido', 'bloqueante'] },
-          motivo: { type: 'string' },
-        },
-        required: ['tipo', 'texto', 'classe'],
-      },
-    },
-  },
-  required: ['itens'],
-}
-
 const PLANO = {
   type: 'object',
   properties: {
@@ -287,7 +262,7 @@ const PRE_VOO = {
 }
 
 // Plano: args.milestones (ou args.plano.milestones) direto; na retomada, o que voltou em retomar.plano. Só com
-// args.spec, a missão verifica a simplicidade da SPEC e gera o plano antes de começar.
+// args.spec, a missão gera o plano antes de começar; a simplicidade é conferida antes, na conversa da SPEC.
 const SPEC = typeof args?.spec === 'string' && args.spec.trim() ? args.spec.trim() : null
 const planoDado = args?.milestones ?? args?.plano?.milestones ?? args?.retomar?.plano?.milestones ?? null
 const limitesOk = [MAX_RODADAS_CORRECAO, MAX_PROBLEMAS_POR_RODADA, MAX_RODADAS_REVISAO, MAX_FEATURES_POR_MILESTONE, MAX_RODADAS_CACA].every(n => Number.isInteger(n) && n >= 1) &&
@@ -344,7 +319,7 @@ if (retomar && (!planoDado || ![...planoDado, SUITE].some(m => m.titulo === reto
   throw new Error('args.retomar inválido: use o objeto `retomar` devolvido pela execução que parou ({ aPartirDe, inicioMissao, base, head, commits, concluidas, plano, contexto })')
 }
 
-// Decisões que a missão assumiu pela sugestão da verificação de simplicidade, para o usuário revisar no fim.
+// Decisões que a missão assumiu sem parar (ex.: premissa corrigida na prova de contrato), para o usuário revisar no fim.
 const decisoesAssumidas = Array.isArray(args?.retomar?.decisoesAssumidas) ? args.retomar.decisoesAssumidas.filter(d => typeof d === 'string') : []
 // Features que saíram sem commit como já resolvidas no código e ainda sem evidência do scrutiny ({ titulo, spec,
 // milestone }). Atravessa a retomada; a feature sai da lista quando a evidência chega.
@@ -459,47 +434,17 @@ if (retomar && !retomar.inicioMissao) {
   log(`retomar sem inicioMissao: a suíte final vai cobrir só a partir de ${retomar.base}, não a missão inteira`)
 }
 
-// Só com a SPEC: antes de qualquer código, confere a simplicidade e gera o plano. Pergunta ou corte sugerido para a
-// missão e volta tudo junto para o usuário decidir.
+// Só com a SPEC: antes de qualquer código, gera o plano. A SPEC chega conferida pela skill criar-spec-simples, na
+// conversa com o usuário; a missão não pergunta de novo.
 let milestones = planoDado
 if (!milestones) {
-  phase('Simplicidade')
-  const s = await comRetentativa('simplicidade', () => trabalhar(montar('verificar-simplicidade',
-    `${SPEC_NO_PROMPT()}\n\nLeia a SPEC e o código que ela toca e confira a simplicidade dela. Devolva em itens cada ` +
-    'pergunta (decisão em aberto) e cada corte (o que tirar ou trocar por algo mais simples), com o motivo e a ' +
-    'evidência no código, a sugestão e a classe:\n' +
-    '- decidido: tem sugestão e é técnico ou de desenho interno; a missão segue com a sugestão, sem perguntar;\n' +
-    '- bloqueante: decisão de produto ou de risco (dinheiro, acesso, dado sensível) que nem a SPEC nem o código ' +
-    'respondem, ou corte que remove algo que a SPEC pede explicitamente.\n' +
-    'Na dúvida, item que envolve dinheiro, acesso ou autorização, ou dado sensível é bloqueante; os demais, com ' +
-    'sugestão segura, são decididos. Sem nada, itens vazio. Não escreva arquivos nem rode ' +
-    'build: só leitura.\n' + GIT_PROIBIDO),
-    { label: 'simplicidade', phase: 'Simplicidade', agentType: comoAgente(CONFIG.leitor), schema: SIMPLICIDADE },
-  ))
-  if (!s) return { parouEm: 'simplicidade', motivo: 'o agente que verifica a simplicidade não respondeu', aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
-  // Item sem sugestão não tem como ser decidido pela missão: conta como bloqueante.
-  const bloqueia = i => i.classe !== 'decidido' || !String(i.sugestao ?? '').trim()
-  const bloqueantes = s.itens.filter(bloqueia).map(i => ({ tipo: i.tipo, texto: i.texto, sugestao: i.sugestao ?? null, motivo: i.motivo ?? null }))
-  decisoesAssumidas.push(...s.itens.filter(i => !bloqueia(i)).map(i => `${i.tipo}: ${i.texto} → ${i.sugestao.trim()}`))
-  if (decisoesAssumidas.length) log(`simplicidade: ${decisoesAssumidas.length} decisão(ões) assumida(s) pela sugestão, para revisar no fim`)
-  if (bloqueantes.length) {
-    return {
-      parouEm: 'simplicidade',
-      motivo: `a verificação de simplicidade trouxe ${bloqueantes.length} decisão(ões) de produto ou de risco que a SPEC ` +
-        'não responde: decida, ajuste a SPEC e rode de novo (nenhum código foi escrito)',
-      bloqueantes, decisoesAssumidas, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(),
-    }
-  }
   phase('Planejar')
   const p = await comRetentativa('planejar', () => trabalhar(montar('planejar',
     `${SPEC_NO_PROMPT()}\n\nA SPEC foi aprovada. Leia-a e o código que ela toca e gere o plano: milestones com titulo, ` +
     `criterio verificável, caca (áreas de caça-bug do milestone), userTesting (a jornada, só se houver uma que um ` +
     `usuário percorre; senão omita), ui (as telas e fluxos de usuário do milestone, só se houver; senão omita) e features com titulo único e spec. No máximo ${MAX_FEATURES_POR_MILESTONE} ` +
     `features por milestone. Nunca use "${SUITE.titulo}" como título de milestone: ele é reservado. Não escreva ` +
-    'arquivos nem rode build: só leitura.' +
-    (decisoesAssumidas.length
-      ? `\nDecisões assumidas na verificação de simplicidade (aplique no plano; corte sai do plano):\n- ${decisoesAssumidas.join('\n- ')}`
-      : '') + '\n' + GIT_PROIBIDO),
+    'arquivos nem rode build: só leitura.\n' + GIT_PROIBIDO),
     { label: 'planejar', phase: 'Planejar', agentType: comoAgente(CONFIG.leitor), schema: PLANO },
   ))
   // Campo opcional vazio conta como ausente.

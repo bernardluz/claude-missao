@@ -44,7 +44,7 @@ serviço já faz, se há dado real a preservar.
 
 ## 5. Saída: a SPEC
 
-No formato da skill `criar-spec-simples`, com a primeira linha `<!-- modo: enxugar -->` (a missão reconhece o modo por
+No formato da skill `criar-spec-simples`, conferida como ela manda antes de mostrar, com a primeira linha `<!-- modo: enxugar -->` (a missão reconhece o modo por
 ela) e estas seções a mais:
 
 ```markdown

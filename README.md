@@ -9,8 +9,7 @@ validado e corrigido em loop até fechar.
 
 ```
 Preparar      → branch, HEAD, raiz e a sujeira que já existe (linha de base), lidos pelo git-estado.mjs
-Simplicidade  → só com spec: confere a SPEC contra o código; só decisão de produto ou risco PARA a missão
-Planejar      → só com spec: gera o plano (milestones, features, critérios, caca, userTesting)
+Planejar      → só com spec (já conferida na criar-spec-simples): gera o plano (milestones, features, critérios, caca, userTesting)
 Pré-voo       → o ambiente roda testes e suíte? Falha para antes de qualquer commit
 Contexto      → contexto do plano por área, gerado UMA vez e reaproveitado na retomada
 
@@ -53,7 +52,7 @@ design à parte.
 
 ### Etapas e skills
 
-Cada etapa tem uma técnica curta e genérica em [`etapas/<etapa>.md`](etapas): `verificar-simplicidade`,
+Cada etapa tem uma técnica curta e genérica em [`etapas/<etapa>.md`](etapas):
 `planejar`, `pre-voo`, `prova-de-contrato`, `implementar`, `revisar`, `scrutiny`, `corrigir`, `caca-bug`,
 `user-testing` e `aceite`. O prompt de cada etapa é a técnica dela, mais o trecho do contexto do plano
 da área, mais os aprendizados da missão, mais a tarefa.
@@ -144,7 +143,7 @@ Para pegar um código que já existe e cortá-lo ao modelo mínimo, com os mesmo
    "Estado atual (medido)", "Modelo alvo", "O que sai", "Consumidores que mudam junto" e "Estratégia de corte"
    (reconstruir do zero x cirurgia, hardcut x migration de avanço, ordem de deploy).
 3. **Missão** com `{ "spec": "<caminho>", "modo": "enxugar" }`. As etapas com complemento
-   `etapas/<etapa>.enxugar.md` (simplicidade, planejar, pré-voo, contrato, implementar, caça bug e aceite) recebem a
+   `etapas/<etapa>.enxugar.md` (planejar, pré-voo, contrato, implementar, caça bug e aceite) recebem a
    técnica ajustada para código existente. O pré-voo mede o alvo no início, o aceite mede do mesmo jeito no fim, e o
    resultado traz `medicao: { antes, depois }` para a tabela antes x depois da SPEC.
 
@@ -204,7 +203,7 @@ Todas as chaves são opcionais. Sem configuração, o workflow usa o agente padr
 | `regrasProjeto` | Arquivo que exige a revisão independente, citado aos workers | não cita |
 | `revisor` | `agentType` do revisor (só leitura) | agente padrão |
 | `revisoresPorPasta` | `[{ prefixo, agentType }]`: vale quando **todos** os arquivos estão no prefixo | `[]` |
-| `leitor` | `agentType` só-leitura para simplicidade, plano, contexto, prova de contrato e conferência do git | agente padrão |
+| `leitor` | `agentType` só-leitura para plano, contexto, prova de contrato e conferência do git | agente padrão |
 | `proibicoesExtras` | Proibições somadas às de git, por exemplo variáveis que desligam gates | `[]` |
 | `formatoCommit` | Formato da mensagem de commit | `` `<tipo>: <descrição>` `` |
 | `idioma` | Idioma da mensagem de commit | `pt-BR` |
@@ -256,19 +255,13 @@ Com o workflow instalado, peça ao Claude Code para rodar o workflow `missao` co
 plano em `args`:
 
 - **Com `spec`:** `{ "spec": "docs/specs/minha-entrega.md" }` (caminho no repositório ou o texto da
-  SPEC). A missão confere a simplicidade, gera o plano e segue. Cada pergunta ou corte da simplicidade
-  vem classificado:
-  - **decidido** (tem sugestão e é técnico ou de desenho interno): a missão segue com a sugestão, que vai
-    ao planejador como decisão assumida e volta em `decisoesAssumidas` no resultado e no `retomar`,
-    para você revisar no fim;
-  - **bloqueante** (produto ou risco, como dinheiro, acesso ou dado sensível, sem resposta na SPEC nem no
-    código, ou corte de algo que a SPEC pede): a missão para sem escrever código e devolve os itens em
-    `bloqueantes`. Decida, ajuste a SPEC e rode de novo.
+  SPEC). A missão gera o plano e segue, sem perguntar: a simplicidade é conferida antes, na conversa, pela
+  skill `criar-spec-simples` (ou `enxugar-codigo`), onde as decisões de produto e de risco são fechadas.
 
   O plano gerado volta no resultado (`plano`) e em `retomar.plano`. Se o planejador usar o título
   reservado "Suíte final", o milestone é renomeado para "Milestone final".
-- **Com o plano:** `{ "milestones": [...] }` ou `{ "plano": { "milestones": [...] } }`. Pula a
-  simplicidade e o planejamento.
+- **Com o plano:** `{ "milestones": [...] }` ou `{ "plano": { "milestones": [...] } }`. Pula o
+  planejamento.
 
 
 Se o workflow tiver sido instalado com a sessão já aberta, ele ainda não aparece pelo nome, porque o

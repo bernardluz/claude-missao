@@ -666,9 +666,9 @@ describe('etapas, contexto do plano e aprendizados', () => {
 describe('spec, planejamento e pré-voo', () => {
   const comSpec = (extra = {}) => ({ spec: 'docs/spec.md', ...extra })
 
-  test('plano direto pula simplicidade e planejamento; args.plano também serve', async () => {
+  test('plano direto pula o planejamento; args.plano também serve', async () => {
     const direto = await rodar(plano())
-    assert.equal(direto.contar('simplicidade') + direto.contar('planejar'), 0)
+    assert.equal(direto.contar('planejar'), 0)
     const r = await rodar({ plano: { milestones: plano().milestones } })
     assert.equal(r.resultado.concluido, true)
     assert.deepEqual(r.resultado.plano.milestones.map(m => m.titulo), ['M1', 'M2'])
@@ -678,56 +678,17 @@ describe('spec, planejamento e pré-voo', () => {
     await assert.rejects(rodar({}), /args inválido/)
   })
 
-  test('simplicidade: só item bloqueante para a missão, sem código, e devolve também as decisões assumidas', async () => {
-    const simplicidade = [
-      { tipo: 'pergunta', texto: 'o limite de saque muda?', classe: 'bloqueante', sugestao: 'manter', motivo: 'dinheiro' },
-      { tipo: 'corte', texto: 'tabela de histórico sem uso', classe: 'decidido', sugestao: 'tirar a tabela' },
-      { tipo: 'pergunta', texto: 'qual índice?', classe: 'decidido', sugestao: '' },
-    ]
-    const r = await rodar(comSpec(), { simplicidade })
-    assert.equal(r.resultado.parouEm, 'simplicidade')
-    assert.match(r.resultado.motivo, /2 decisão\(ões\) de produto ou de risco .*nenhum código foi escrito/)
-    // Decidido sem sugestão não tem como seguir: vira bloqueante.
-    assert.deepEqual(r.resultado.bloqueantes.map(b => b.texto), ['o limite de saque muda?', 'qual índice?'])
-    assert.deepEqual(r.resultado.decisoesAssumidas, ['corte: tabela de histórico sem uso → tirar a tabela'])
-    assert.equal(r.contar('planejar'), 0)
-    assert.equal(r.commits, 0)
-    assert.match(r.prompt('simplicidade'), /SPEC \(texto, ou caminho de arquivo no repositório para ler inteiro\):\ndocs\/spec\.md/)
-    assert.match(r.prompt('simplicidade'), /bloqueante: decisão de produto ou de risco \(dinheiro, acesso, dado sensível\)/)
-    assert.match(r.prompt('simplicidade'), /corte que remove algo que a SPEC pede explicitamente/)
-    assert.match(r.prompt('simplicidade'), /Na dúvida, item que envolve dinheiro, acesso ou autorização, ou dado sensível é bloqueante; os demais, com sugestão segura, são decididos/)
-    assert.doesNotMatch(r.prompt('simplicidade'), /Na dúvida entre as duas, e com sugestão segura, decidido/)
-  })
-
-  test('simplicidade só com itens decididos não para: as decisões vão ao planejador, ao resultado e ao retomar', async () => {
-    const estado = { git: ['base0000'], sujo: false }
-    const simplicidade = [
-      { tipo: 'pergunta', texto: 'enum ou texto no status?', classe: 'decidido', sugestao: 'enum' },
-      { tipo: 'corte', texto: 'fila de reprocessamento', classe: 'decidido', sugestao: 'chamada HTTP síncrona' },
-    ]
-    const decisoes = ['pergunta: enum ou texto no status? → enum', 'corte: fila de reprocessamento → chamada HTTP síncrona']
-    const p1 = await rodar(comSpec(), { simplicidade, suite: [2, 2] }, estado)
-    assert.equal(p1.contar('planejar'), 1)
-    assert.match(p1.prompt('planejar'), /Decisões assumidas na verificação de simplicidade \(aplique no plano; corte sai do plano\):\n- pergunta: enum ou texto no status\? → enum\n- corte: fila de reprocessamento → chamada HTTP síncrona/)
-    assert.equal(p1.resultado.parouEm, 'Suíte final')
-    assert.deepEqual(p1.resultado.decisoesAssumidas, decisoes)
-    assert.deepEqual(p1.resultado.retomar.decisoesAssumidas, decisoes)
-    const p2 = await rodar(comSpec({ retomar: p1.resultado.retomar }), {}, estado)
-    assert.equal(p2.resultado.concluido, true)
-    assert.deepEqual(p2.resultado.decisoesAssumidas, decisoes)
-  })
-
   test('spec aprovada: plano gerado executa e volta no resultado e no retomar; a retomada não replaneja', async () => {
     const estado = { git: ['base0000'], sujo: false }
     const gerado = [{ titulo: 'G1', criterio: 'c', caca: [], userTesting: ' ', features: [{ titulo: 'H1', spec: 's' }] }]
     const p1 = await rodar(comSpec(), { planoGerado: gerado, suite: [2, 2] }, estado)
-    assert.equal(p1.contar('simplicidade'), 1)
+    assert.match(p1.prompt('planejar'), /A SPEC foi aprovada/)
     assert.equal(p1.contar('planejar'), 1)
     assert.equal(p1.resultado.parouEm, 'Suíte final')
     assert.deepEqual(p1.resultado.retomar.plano, { milestones: [{ titulo: 'G1', criterio: 'c', features: [{ titulo: 'H1', spec: 's' }] }] })
     const p2 = await rodar(comSpec({ retomar: p1.resultado.retomar }), {}, estado)
     assert.equal(p2.resultado.concluido, true)
-    assert.equal(p2.contar('simplicidade') + p2.contar('planejar'), 0)
+    assert.equal(p2.contar('planejar'), 0)
     assert.deepEqual(p2.resultado.plano, p1.resultado.retomar.plano)
   })
 
@@ -1153,10 +1114,7 @@ describe('aprendizados nas paradas e na retomada', () => {
   const embutido = (texto, args, opcoes, estado) =>
     executar(gerar(readFileSync(NUCLEO, 'utf8'), {}, '', lerEtapas(), texto).replace('export const meta', 'const meta'), args, opcoes, estado)
 
-  test('paradas de simplicidade, planejar e pré-voo trazem a sugestão', async () => {
-    const simp = await rodar({ spec: 's.md' }, { simplicidade: [{ tipo: 'pergunta', texto: 'p?', classe: 'bloqueante' }], aprendizados: { simplicidade: ['rode com forks=1'] } })
-    assert.equal(simp.resultado.parouEm, 'simplicidade')
-    assert.equal(simp.resultado.sugestaoAprendizados, '- rode com forks=1\n')
+  test('paradas de planejar e pré-voo trazem a sugestão', async () => {
     const plan = await rodar({ spec: 's.md' }, { planoGerado: [{ titulo: 'G', criterio: 'c', features: [{ titulo: 'H', spec: 's' }, { titulo: 'H', spec: 's' }] }], aprendizados: { planejar: ['x'] } })
     assert.equal(plan.resultado.parouEm, 'planejar')
     assert.equal(plan.resultado.sugestaoAprendizados, '- x\n')
@@ -1178,7 +1136,7 @@ describe('aprendizados nas paradas e na retomada', () => {
 
 describe('modo enxugar', () => {
   const COMPLEMENTOS = [
-    ['simplicidade', 'verificar-simplicidade'], ['planejar', 'planejar'], ['pré-voo', 'pre-voo'], ['contrato: M1', 'prova-de-contrato'],
+    ['planejar', 'planejar'], ['pré-voo', 'pre-voo'], ['contrato: M1', 'prova-de-contrato'],
     ['F1', 'implementar'], ['caça: geral (M1, rodada 1)', 'caca-bug'], ['verificação 1: achado 1 (M1, rodada 1)', 'caca-bug'],
     ['aceite', 'aceite'], ['revisão: F1', 'revisar'], ['revisão: M1', 'scrutiny'], ['testes: M1', 'scrutiny'],
     ['correção 1.1 (M1)', 'corrigir'],
@@ -1489,6 +1447,20 @@ describe('prova de contrato decide o trivial', () => {
     assert.match(r.prompt('F1'), /Correção da prova de contrato \(valor real no código\): 18 call sites de pagar\(\) → 20 call sites/)
     assert.doesNotMatch(r.prompt('F2'), /Correção da prova de contrato/)
     assert.deepEqual(r.resultado.decisoesAssumidas, ['contrato (M1): 18 call sites de pagar() → 20 call sites'])
+  })
+
+  test('decisão assumida na prova de contrato atravessa a parada e volta depois da retomada', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const contratoFalso = { M1: [
+      { premissa: '18 call sites de pagar()', confere: false, classe: 'decidido', valorReal: '20 call sites', feature: 'F1' },
+    ] }
+    const decisoes = ['contrato (M1): 18 call sites de pagar() → 20 call sites']
+    const p1 = await rodar(comUmMilestone(), { contratoFalso, suite: [2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'Suíte final')
+    assert.deepEqual(p1.resultado.retomar.decisoesAssumidas, decisoes)
+    const p2 = await rodar({ ...comUmMilestone(), retomar: p1.resultado.retomar }, {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.deepEqual(p2.resultado.decisoesAssumidas, decisoes)
   })
 
   test('prompt do provador traz o plano e a SPEC e manda escolha nova e decisão explícita para bloqueante', async () => {

@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { schemaEstrito, normalizarResultado } from './schema.mjs'
 
 const dentro = (base, alvo) => { const r = relative(base, alvo); return r === '' || (!isAbsolute(r) && r !== '..' && !r.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) }
-const somenteLeitura = o => ['preparo', 'conferência', 'simplicidade', 'planejar', 'contexto do plano'].includes(o.label) || /^(revisão:|contrato:|telas:|áreas de caça:)/.test(o.label)
+const somenteLeitura = o => ['preparo', 'conferência', 'planejar', 'contexto do plano'].includes(o.label) || /^(revisão:|contrato:|telas:|áreas de caça:)/.test(o.label)
 function executavelCodex(projeto) {
   const nome = process.platform === 'win32' ? 'codex.exe' : 'codex'
   for (const pasta of (process.env.PATH ?? '').split(delimiter)) {

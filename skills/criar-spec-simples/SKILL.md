@@ -7,8 +7,8 @@ description: "Escreve a SPEC de uma entrega no modelo de simplicidade, antes de 
 
 Instalada pelo `claude-missao` no global do Claude e do Codex: edite em `{{CLAUDE_MISSAO}}` e reinstale (veja "Atualizar a missão").
 
-Você escreve a SPEC na conversa, com o usuário, antes da missão. A missão depois confere a simplicidade, gera o plano e
-executa. Uma SPEC boa cabe numa página e deixa claro o que **não** entra.
+Você escreve e confere a SPEC na conversa, com o usuário, antes da missão. A missão recebe a SPEC já aprovada, gera o
+plano e executa sem perguntar de novo: toda dúvida de produto ou de risco se resolve aqui. Uma SPEC boa cabe numa página e deixa claro o que **não** entra.
 
 ## Antes de escrever
 
@@ -36,6 +36,9 @@ Uma ou duas frases: quem, qual problema, qual resultado.
 | tabela `pedido` | tabela | passos 2 e 3 |
 | `POST /pedidos` | endpoint | passo 2 |
 
+## Decisões já fechadas
+- Cada decisão de produto ou de risco que o usuário respondeu, com a resposta.
+
 ## Fora do escopo
 - O que parece necessário mas não entra agora, e por quê.
 
@@ -52,6 +55,20 @@ Uma ou duas frases: quem, qual problema, qual resultado.
   interna pede menos).
 - Entre duas soluções corretas, vence a que tem menos peças.
 - Passou de uma página: divida a entrega ou corte.
+
+## Conferir a simplicidade (antes de mostrar)
+
+Com o rascunho pronto, compare a SPEC com o código atual:
+
+- Cada tabela, fila, job, estado, tela e endpoint novo tem uso real: quem usa e em que passo do fluxo. Sem uso, corte.
+- O que o código já tem e a SPEC recria (entidade, cliente HTTP, componente): reuso vence peça nova.
+- Dado de outro serviço se lê do dono na hora; cópia, projeção ou sincronização só com necessidade medida.
+- Estado que se calcula não se grava. Mensageria só para fluxo de fato assíncrono.
+
+Corte ou escolha técnica de desenho interno: aplique direto e cite na SPEC. Decisão de produto ou de risco (dinheiro,
+acesso ou autorização, dado sensível) que nem a SPEC nem o código respondem, ou corte de algo que o usuário pediu:
+pergunte, uma por vez, com a opção mais simples como sugestão, e grave a resposta em "Decisões já fechadas". A SPEC
+só vai para a missão sem nenhuma dessas em aberto.
 
 ## Depois
 
