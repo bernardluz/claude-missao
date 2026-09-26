@@ -1144,10 +1144,11 @@ async function provarContrato(m, aFazer) {
   if (!r) return { motivo: 'o agente da prova de contrato não respondeu' }
   const naoConferem = r.premissas.filter(p => !p.confere)
   // Só é decidida a premissa com valor real e feature certa; migration nunca é, porque o número é escolha do plano.
-  // Ancorada em migration de verdade: arquivo Flyway (V71__x.sql, V maiúsculo) ou a palavra migration/Flyway.
+  // Ancorada em migration de verdade: arquivo Flyway (V71__x.sql, V maiúsculo), ou palavra de migration (inclusive
+  // em pt-BR) junto com número de versão. "Migração de tela" sem versão não trava.
   const ehMigration = p => {
     const t = `${p.premissa} ${p.valorReal ?? ''}`
-    return /\bV\d+__/.test(t) || /\bmigrations?\b|\bflyway\b/i.test(t)
+    return /\bV\d+__/.test(t) || (/\bmigrations?\b|\bflyway\b|\bmigraç(ão|ões)(?![\p{L}\p{N}_])/iu.test(t) && /\bV\d+\b/.test(t))
   }
   const decididas = naoConferem.filter(p => p.classe === 'decidido' && String(p.valorReal ?? '').trim() &&
     aFazer.some(f => f.titulo === p.feature) && !ehMigration(p))

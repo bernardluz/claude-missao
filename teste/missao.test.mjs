@@ -1460,10 +1460,11 @@ describe('prova de contrato decide o trivial', () => {
     const param = { M1: [
       { premissa: 'arquivo V71__x.sql', confere: false, classe: 'decidido', valorReal: 'V70__x.sql', feature: 'F1', pergunta: 'arquivo?' },
       { premissa: 'migration V71', confere: false, classe: 'decidido', valorReal: 'V70', feature: 'F1', pergunta: 'número?' },
+      { premissa: 'próxima migração é V71', confere: false, classe: 'decidido', valorReal: 'V70', feature: 'F1', pergunta: 'pt-BR?' },
     ] }
     const r1 = await rodar(comUmMilestone(), { contratoFalso: param })
     assert.equal(r1.resultado.parouEm, 'M1')
-    assert.deepEqual(r1.resultado.perguntas, ['arquivo?', 'número?'])
+    assert.deepEqual(r1.resultado.perguntas, ['arquivo?', 'número?', 'pt-BR?'])
 
     const seguem = { M1: [
       { premissa: 'rota /api/v2/contas', confere: false, classe: 'decidido', valorReal: '/api/v2/conta', feature: 'F1' },

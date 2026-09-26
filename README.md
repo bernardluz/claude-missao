@@ -78,8 +78,8 @@ revisar no fim. O que o plano ou a SPEC marca como decisão não é premissa a p
 Para a missão: escolha para código novo (número de migration, tabela ou rota nova, contrato novo) que o plano não
 fixou, conflito concreto no código com uma decisão do plano (ex.: já existe arquivo com o mesmo número de
 migration), divergência que muda comportamento ou contrato, ou que envolve dinheiro, acesso ou dado sensível sem
-resposta no código. Uma trava no código nunca decide premissa de migration (arquivo `V71__x.sql`, palavra
-migration ou Flyway).
+resposta no código. Uma trava no código nunca decide premissa de migration (arquivo `V71__x.sql`, ou palavra
+migration, migração ou Flyway junto com um número de versão como V71).
 
 **SPEC simples.** A skill `criar-spec-simples`, instalada no global, orienta o agente principal a
 escrever a SPEC na conversa, antes da missão: quem usa, fluxo em cliques, cada peça com uso real,
