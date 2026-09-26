@@ -71,10 +71,12 @@ etapa como "Aprendizados do projeto"; mudou, reinstale (`--verificar` acusa).
 Como vai em todo prompt, o arquivo precisa de curadoria: junte repetidos, corte o que envelheceu e mantenha só
 técnica e armadilha durável. O instalador avisa, sem falhar, quando ele passa de 60 linhas.
 
-**Prova de contrato.** Premissa que não confere e tem correção óbvia no código (contagem, número, nome,
-caminho, próxima versão de migration) é decidida: a spec da feature recebe o valor real e a correção entra em
-`decisoesAssumidas`, para você revisar no fim. Só para a missão a divergência que muda comportamento ou
-contrato, ou que envolve dinheiro, acesso ou dado sensível sem resposta no código.
+**Prova de contrato.** O provador recebe o plano do milestone e a SPEC. Premissa que não confere e é só fato
+descritivo de código que já existe no dono (contagem de chamadas, caminho, nome atual de símbolo ou campo) é
+decidida: a spec da feature indicada recebe o valor real e a correção entra em `decisoesAssumidas`, para você
+revisar no fim. Para a missão: escolha para código novo (número de migration, tabela ou rota nova, contrato novo),
+o que o plano ou a SPEC marca como decisão, divergência que muda comportamento ou contrato, ou que envolve
+dinheiro, acesso ou dado sensível sem resposta no código.
 
 **SPEC simples.** A skill `criar-spec-simples`, instalada no global, orienta o agente principal a
 escrever a SPEC na conversa, antes da missão: quem usa, fluxo em cliques, cada peça com uso real,
