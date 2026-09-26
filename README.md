@@ -8,7 +8,7 @@ validado e corrigido em loop até fechar.
 ## Como funciona
 
 ```
-Preparar      → árvore limpa, branch, HEAD e raiz, lidos pelo script git-estado.mjs
+Preparar      → branch, HEAD, raiz e a sujeira que já existe (linha de base), lidos pelo git-estado.mjs
 Simplicidade  → só com spec: confere a SPEC contra o código; pergunta ou corte PARA a missão
 Planejar      → só com spec: gera o plano (milestones, features, critérios, caca, userTesting)
 Pré-voo       → o ambiente roda testes e suíte? Falha para antes de qualquer commit
@@ -99,9 +99,11 @@ cortes explícitos e critérios de aceite verificáveis.
 - **Saída em arquivo, nunca em pipe.** Os agentes mandam a saída de build, testes, gates e
   `git commit` para arquivo temporário e leem o arquivo depois. Um daemon deixado vivo pelo gate, como o
   do compilador Kotlin, herda o pipe e trava o comando.
-- **Dump de crash do bash.** No Windows, `*.stackdump` não rastreado na raiz é dump de crash do bash. O
-  agente de commit o apaga e a missão registra no log, sem apontamento para a feature. Até ele ser
-  apagado, as conferências o toleram. Apagar qualquer outra coisa no repositório faz a missão parar.
+- **Árvore suja não para a missão.** O que já estava sem commit no início vira linha de base
+  (`sujeiraInicial`, levada no `retomar`) e fica fora dos commits. Cada commit leva só os arquivos que o
+  worker declarou (`git add`/`git commit -- <lista>`, nunca `git add -A`). Arquivo da linha de base que o
+  worker editou vai inteiro e vira aviso em `resultado.sujeiraCommitada`. Sujeira de outras sessões no meio
+  da missão também não para nem entra nos commits.
 - **Quedas retentadas com segurança.**
   - Agente que cai (modelo ou API) é retentado.
   - Worker que caiu deixando diff parcial é continuado por outro.

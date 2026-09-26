@@ -23,10 +23,10 @@ Valem para você e para todo filho, em qualquer passo:
 - **Recusa não é contornada.** Se o harness ou o classificador de permissões recusar um comando ou uma ferramenta,
   não tente de outro jeito (outro comando, outra ferramenta, outro caminho). Você para a missão e mostra ao usuário
   o texto da recusa. Filho que recebe recusa devolve a você o texto, sem tentar de novo.
-- **Dump de crash do bash.** `*.stackdump` não rastreado na raiz do repo é dump de crash do bash do Windows (msys).
-  Você o apaga, registra em `estado/` e não o trata como mudança fora do escopo da feature nem como árvore suja.
-  Filhos não mexem nele: ignoram e deixam para você. Apagar qualquer outra coisa não é permitido; se você ou um filho
-  apagou, pare.
+- **Árvore suja não para a missão.** O que já estava sem commit no início é linha de base: grave a lista em
+  `estado/` e não a inclua, desfaça nem apague. Cada commit leva só os arquivos que o implementador declarou. Arquivo
+  da linha de base que ele editou vai inteiro no commit e vira aviso no estado e no resumo final. Sujeira de outras
+  sessões no meio da missão também não para. Ninguém apaga nada no repositório além do que a feature pede.
 
 ## Entrada
 
@@ -94,8 +94,7 @@ da SPEC), os bugs já corrigidos pela caça e as lições da missão (regras cob
 
 Toda leitura de git da missão usa `node .claude/missao/git-estado.mjs <base>`: ele imprime um JSON com `head`,
 `branch`, `raiz`, `limpo`, `pendencias`, `commits` (em ordem) e `arquivos`. Confira pelo JSON, não por resumo.
-Para preparar, rode com `HEAD` como base: árvore limpa (salvo dump de crash do bash, que você apaga).
-Árvore suja ou branch `main`: pare e diga por quê. Grave `inicio` = HEAD no estado.
+Para preparar, rode com `HEAD` como base e grave as `pendencias` como linha de base. Branch `main`: pare e diga por quê. Grave `inicio` = HEAD no estado.
 
 Depois, o **pré-voo**: um filho confere se o ambiente roda o que a missão vai precisar (`preVoo` da configuração, ou
 o que ele descobrir pelo plano). Faltou algo: pare antes de qualquer commit, com a lista do que falta.
@@ -155,7 +154,7 @@ Uma feature por vez. Ticket em status 1.
    `git add` e a conferência de `git diff` vazio valem em toda tentativa, e não só na primeira.
 6. **Conferir o commit.** `git rev-list <HEAD esperado>..HEAD` tem de ser só o SHA do seu commit, e
    `git show --name-only --format='%H %P' HEAD` mostra o pai igual ao HEAD esperado e exatamente os arquivos revisados.
-   Árvore limpa depois, salvo dump de crash do bash. Outro SHA no intervalo: grave o seu commit no estado, se ele tem
+   Sujeira restante na árvore (linha de base ou outras sessões) não conta. Outro SHA no intervalo: grave o seu commit no estado, se ele tem
    só arquivos revisados, e pare, como em [Commit de fora](#commit-de-fora). Arquivo não revisado no seu commit: pare
    sem gravá-lo. Tudo certo: grave no estado e no ticket. Ticket em status 2. Arquive os dois filhos
    (`traycer_archive_agent`).
@@ -226,8 +225,8 @@ Ao parar:
 2. Deixe o ticket em curso em status 1.
 3. Diga ao usuário, em poucas linhas, o que parou e as opções.
 
-Para **retomar**, releia `estado/`. Confira que branch e HEAD batem com o gravado e que a árvore está limpa, salvo o
-diff parcial da feature em curso e o dump de crash do bash. Continue do ponto gravado. Features já commitadas são
+Para **retomar**, releia `estado/`. Confira que branch e HEAD batem com o gravado; a árvore pode ter a linha de base, o diff
+parcial da feature em curso e sujeira de outras sessões. Continue do ponto gravado. Features já commitadas são
 reconhecidas pelo título exato: não renomeie entre execuções. Se o repositório não bater, não adivinhe:
 mostre a diferença ao usuário.
 
