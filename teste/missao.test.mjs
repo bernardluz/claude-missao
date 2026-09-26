@@ -23,7 +23,7 @@ describe('fluxo principal', () => {
     const r = await rodar(plano())
     assert.equal(r.resultado.concluido, true)
     assert.equal(r.commits, 3)
-    assert.equal(r.agentes, 3 + 4 * 3 + 7 * 2 + 5)
+    assert.equal(r.agentes, 3 + 4 * 3 + 8 * 2 + 5)
     assert.equal(r.contar('suíte completa'), 1)
     assert.match(r.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${r.agentes} agentes`))
     assert.equal(r.contar('revisão: F'), 3)
@@ -1216,5 +1216,78 @@ describe('modo enxugar: medição inicial e validação do modo', () => {
     const p1 = await rodar(plano(), { validacao: [2, 2] }, estado)
     await assert.rejects(rodar(plano({ retomar: { ...p1.resultado.retomar, modo: 'outro' } }), {}, estado), /args inválido/)
     await assert.rejects(rodar(plano({ modo: null })), /args inválido/)
+  })
+})
+
+describe('UI/UX por milestone', () => {
+  const comTela = extra => ({
+    ...extra,
+    milestones: [
+      { titulo: 'M1', criterio: 'c', ui: 'diálogo de transferência', userTesting: 'transfere entre contas', features: [{ titulo: 'F1', spec: 's' }] },
+      { titulo: 'M2', criterio: 'c', features: [{ titulo: 'F2', spec: 's' }] },
+    ],
+  })
+
+  test('roda só em milestone com tela, depois do contrato e antes de implementar', async () => {
+    const r = await rodarCom({}, comTela())
+    assert.equal(r.resultado.concluido, true)
+    const ordem = r.chamadas.map(c => c.label)
+    assert.ok(ordem.indexOf('contrato: M1') < ordem.indexOf('design: M1'))
+    assert.ok(ordem.indexOf('design: M1') < ordem.indexOf('F1'))
+    // M1 traz ui no plano: sem detecção. M2 não traz: o agente barato detecta e não acha tela.
+    assert.equal(r.contar('telas: M1'), 0)
+    assert.equal(r.chamadas.find(c => c.label === 'telas: M2').model, 'haiku')
+    assert.equal(r.contar('design: M2'), 0)
+    assert.match(r.prompt('design: M1'), /diálogo de transferência/)
+    assert.match(r.prompt('design: M1'), /skill \/design, a skill impeccable ou a ferramenta Artifact de design/)
+    assert.match(r.prompt('design: M1'), /Não espere aprovação de ninguém/)
+    assert.ok(r.prompt('design: M1').includes('Técnica da etapa ui-ux'))
+    assert.match(r.logs.find(l => l.startsWith('Estimativa')), new RegExp(`${r.agentes} agentes`))
+  })
+
+  test('implementar, revisar e user testing recebem o desenho; o resto do milestone sem tela não', async () => {
+    const r = await rodarCom({}, comTela(), { userTesting: { M1: [1, 0] } })
+    assert.equal(r.resultado.concluido, true)
+    for (const label of ['F1', 'revisão: F1', 'user testing: M1', 'correção 1.1 (M1)']) {
+      assert.match(r.prompt(label), /Desenho de UI\/UX do milestone[^\n]*\ndesenho de M1: seletor pesquisável de conta/, label)
+      assert.match(r.prompt(label), /Nunca peça ID, UUID ou código técnico digitado/, label)
+    }
+    assert.match(r.prompt('revisão: F1'), /pedir ID ou UUID digitado à mão.*é bloqueante/)
+    assert.doesNotMatch(r.prompt('F2'), /Desenho de UI\/UX/)
+  })
+
+  test('resultado traz designs com links, texto e os desvios do user testing', async () => {
+    const r = await rodarCom({}, comTela(), { userTesting: { M1: [1, 0] }, designLinks: ['https://claude.ai/design/x'] })
+    assert.deepEqual(r.resultado.designs, [{
+      milestone: 'M1', links: ['https://claude.ai/design/x'], texto: 'desenho de M1: seletor pesquisável de conta', desvios: ['u0'],
+    }])
+  })
+
+  test('agente de UI/UX que cai não para a missão', async () => {
+    const r = await rodar(comTela({ maxRetentativasInfra: 0 }), { quedas: { 'design: M1': 1 } })
+    assert.equal(r.resultado.concluido, true)
+    assert.deepEqual(r.resultado.designs, [])
+    assert.ok(r.logs.some(l => /M1: o agente de UI\/UX não respondeu; a missão segue sem desenho/.test(l)))
+  })
+
+  test('retomar preserva o desenho e não redesenha', async () => {
+    const estado = { git: ['base0000'], sujo: false }
+    const p1 = await rodar(comTela(), { validacao: [2, 2] }, estado)
+    assert.equal(p1.resultado.parouEm, 'M1')
+    assert.equal(p1.resultado.retomar.designs.M1.texto, 'desenho de M1: seletor pesquisável de conta')
+    const p2 = await rodar(comTela({ retomar: p1.resultado.retomar }), {}, estado)
+    assert.equal(p2.resultado.concluido, true)
+    assert.equal(p2.contar('design: M1'), 0)
+    assert.equal(p2.contar('telas: M2'), 1)
+    assert.equal(p2.resultado.designs[0].milestone, 'M1')
+  })
+
+  test('detecção barata acha tela e o milestone ganha desenho; modo enxugar recebe o complemento', async () => {
+    const r = await rodarCom({}, { spec: 's.md', modo: 'enxugar' }, { ui: { M1: 'tela de contas' } })
+    assert.equal(r.contar('design: M1'), 1)
+    assert.match(r.prompt('design: M1'), /tela de contas/)
+    assert.match(r.prompt('design: M1'), /Modo enxugar \(código existente\):\nModo enxugar: desenhe só as telas que mudam/)
+    const normal = await rodarCom({}, { spec: 's.md' }, { ui: { M1: 'tela de contas' } })
+    assert.doesNotMatch(normal.prompt('design: M1'), /Modo enxugar/)
   })
 })

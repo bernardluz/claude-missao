@@ -9,6 +9,7 @@ export const meta = {
     { title: 'Pré-voo', detail: 'confere se o ambiente roda testes e suíte antes de qualquer commit' },
     { title: 'Contexto', detail: 'contexto do plano por área, gerado uma vez e reaproveitado na retomada' },
     { title: 'Contrato', detail: 'por milestone: confere no código do dono as premissas das features' },
+    { title: 'UI/UX', detail: 'milestone com tela: desenha telas e fluxos com checklist de UX, sem esperar aprovação' },
     { title: 'Implementar', detail: 'por feature, em série: implementa, revisão independente, commit' },
     { title: 'Scrutiny', detail: 'confere commits; testes, lint, typecheck e revisão contra o critério do milestone' },
     { title: 'Corrigir', detail: 'um item por problema apontado, com revisão e commit próprios' },
@@ -247,6 +248,7 @@ const PLANO = {
           criterio: { type: 'string' },
           caca: { type: 'array', items: { type: 'string' } },
           userTesting: { type: 'string' },
+          ui: { type: 'string' },
           features: {
             type: 'array',
             items: { type: 'object', properties: { titulo: { type: 'string' }, spec: { type: 'string' } }, required: ['titulo', 'spec'] },
@@ -302,9 +304,9 @@ function erroDoPlano(ms) {
   const textos = v => Array.isArray(v) && v.every(x => typeof x === 'string' && x.trim())
   const forma = Array.isArray(ms) && ms.length > 0 && ms.every(m => m && m.titulo && m.criterio &&
     Array.isArray(m.features) && m.features.length > 0 && m.features.every(f => f && f.titulo && f.spec) &&
-    (m.caca === undefined || textos(m.caca)) && (m.userTesting === undefined || typeof m.userTesting === 'string'))
+    (m.caca === undefined || textos(m.caca)) && (m.userTesting === undefined || typeof m.userTesting === 'string') && (m.ui === undefined || typeof m.ui === 'string'))
   if (!forma) {
-    return 'plano inválido: milestones: [{ titulo, criterio, caca?: [áreas], userTesting?: jornada, features: [{ titulo, spec }] }], sem listas vazias'
+    return 'plano inválido: milestones: [{ titulo, criterio, caca?: [áreas], userTesting?: jornada, ui?: telas, features: [{ titulo, spec }] }], sem listas vazias'
   }
   const featuresRepetidas = repetidosEm(ms.flatMap(m => m.features.map(f => f.titulo)))
   if (featuresRepetidas.length) return `títulos de feature repetidos: ${featuresRepetidas.join(', ')}`
@@ -452,13 +454,13 @@ if (!milestones) {
   const p = await comRetentativa('planejar', () => trabalhar(montar('planejar',
     `${SPEC_NO_PROMPT()}\n\nA SPEC foi aprovada. Leia-a e o código que ela toca e gere o plano: milestones com titulo, ` +
     `criterio verificável, caca (áreas de caça-bug do milestone), userTesting (a jornada, só se houver uma que um ` +
-    `usuário percorre; senão omita) e features com titulo único e spec. No máximo ${MAX_FEATURES_POR_MILESTONE} ` +
+    `usuário percorre; senão omita), ui (as telas e fluxos de usuário do milestone, só se houver; senão omita) e features com titulo único e spec. No máximo ${MAX_FEATURES_POR_MILESTONE} ` +
     `features por milestone; o título "${SUITE.titulo}" é reservado. Não escreva arquivos nem rode build: só leitura.\n` +
     GIT_PROIBIDO),
     { label: 'planejar', phase: 'Planejar', agentType: comoAgente(CONFIG.leitor), schema: PLANO },
   ))
   // Campo opcional vazio conta como ausente.
-  const gerado = p?.milestones?.map(m => ({ ...m, caca: m.caca?.length ? m.caca : undefined, userTesting: m.userTesting?.trim() || undefined }))
+  const gerado = p?.milestones?.map(m => ({ ...m, caca: m.caca?.length ? m.caca : undefined, userTesting: m.userTesting?.trim() || undefined, ui: m.ui?.trim() || undefined }))
   const erro = gerado ? erroDoPlano(gerado) : 'o agente de planejamento não respondeu'
   if (erro) return { parouEm: 'planejar', motivo: `plano gerado não serve: ${erro}`, plano: p ?? null, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados() }
   milestones = JSON.parse(JSON.stringify(gerado))
@@ -476,9 +478,9 @@ const planoTexto = pendentes.filter(m => !m.suite).map(m =>
 const totalFeatures = pendentes.reduce((n, m) => n + m.features.length, 0)
 // preparo, pré-voo, conferência da retomada e contexto (se não veio do retomar); por feature: worker, revisão, commit e conferência; por
 // milestone: prova de contrato, 2 conferências, 2 validadores, caça (um caçador por área, mais o agente que deriva as
-// áreas se o plano não as traz) e user testing se houver jornada; fim: caça final (com 2+ milestones, fora da
+// áreas se o plano não as traz), UI/UX (desenho, ou o agente que detecta se há tela) e user testing se houver jornada; fim: caça final (com 2+ milestones, fora da
 // retomada na suíte), 2 conferências, suíte e aceite
-const porMilestone = m => 5 + (m.caca ? m.caca.length : 2) + (m.userTesting ? 1 : 0)
+const porMilestone = m => 6 + (m.caca ? m.caca.length : 2) + (m.userTesting ? 1 : 0)
 const estimativa = 2 + (retomar ? 1 : 0) + (contexto.areas.length || !planoTexto ? 0 : 1) + 4 * totalFeatures +
   pendentes.filter(m => !m.suite).reduce((n, m) => n + porMilestone(m), 0) +
   (milestones.length > 1 && !cacaFinalFeita ? 1 : 0) + 4
@@ -494,6 +496,18 @@ let medicaoAntes = retomar?.medicaoAntes ?? null
 // A medição inicial tirada na retomada (ou que faltou) não é o "antes" de verdade: vai marcada como parcial.
 let antesParcial = retomar?.antesParcial === true
 let medicaoDepois = null
+// Desenho de UI/UX por milestone (título → { ui, links, texto, desvios } ou { semTela: true }), levado no retomar para a
+// retomada não redesenhar. Nunca para a missão: o usuário revisa os desenhos no fim, em resultado.designs.
+const designs = { ...(retomar?.designs && typeof retomar.designs === 'object' ? retomar.designs : {}) }
+const listaDesigns = () => Object.entries(designs).filter(([, d]) => d && !d.semTela)
+  .map(([milestone, d]) => ({ milestone, links: d.links ?? [], texto: d.texto ?? '', desvios: d.desvios ?? [] }))
+function blocoDesign(titulo) {
+  const d = designs[titulo]
+  if (!d || d.semTela || (!d.texto && !d.links?.length)) return ''
+  return `\nDesenho de UI/UX do milestone (siga-o nas telas e fluxos de usuário):\n${d.texto}` +
+    (d.links?.length ? `\nLinks do desenho: ${d.links.join(' ')}` : '') +
+    (ETAPAS['ui-ux'] ? `\n${ETAPAS['ui-ux']}` : '')
+}
 const MEDIR = 'Meça também o alvo desta missão e devolva em medicao: linhas de código (sem testes), tabelas vivas, ' +
   'filas/listeners, arquivos e testes, e em medicao.comandos os comandos que usou.'
 
@@ -560,7 +574,7 @@ const naLista = (arquivos, a) => arquivos.has(a) || [...arquivos].some(p => p.en
 
 function promptTrabalho(f, extra) {
   return montar(f.etapa ?? 'implementar',
-    `Implemente a feature "${f.titulo}".\nSpec: ${f.spec}\n${extra}\n` +
+    `Implemente a feature "${f.titulo}".\nSpec: ${f.spec}\n${extra}${blocoDesign(f.milestone)}\n` +
     `${TESTES}, e revise o próprio diff.\n` + SAIDA_EM_ARQUIVO + '\n' +
     'NÃO faça commit nem stage: a revisão independente' +
     (CONFIG.regrasProjeto ? ` exigida pelo ${CONFIG.regrasProjeto}` : '') +
@@ -796,6 +810,10 @@ async function implementar(features, fase) {
         'Todo o diff ainda não commitado é desta feature: veja `git status`, `git diff HEAD` (inclui o que estiver em ' +
         `stage) e os arquivos novos. Arquivo ${DUMP_DO_BASH}: ignore-o. ` +
         'Aponte só problemas bloqueantes de correção, segurança, contrato ou testes faltantes.' +
+        (blocoDesign(f.milestone)
+          ? `${blocoDesign(f.milestone)}\nConfira a aderência das telas desta feature ao desenho e ao checklist de UX. Achado ` +
+            'grave de UX (pedir ID ou UUID digitado à mão, ação destrutiva sem confirmação, tela sem ponto de entrada) é bloqueante.'
+          : '') +
         memoria + '\nSomente leitura. ' + SAIDA_EM_ARQUIVO + '\n' + GIT_PROIBIDO, f.guias ?? []),
         { label: `revisão: ${f.titulo}`, phase: fase, agentType: revisorPara([...arquivos]), schema: VALIDACAO },
       ))
@@ -1051,6 +1069,46 @@ async function provarContrato(m, aFazer) {
   }
 }
 
+const TELAS = { type: 'object', properties: { ui: { type: 'string' } }, required: ['ui'] }
+const DESIGN = {
+  type: 'object',
+  properties: { aprendizados: APRENDIZADOS, links: { type: 'array', items: { type: 'string' } }, texto: { type: 'string' } },
+  required: ['texto'],
+}
+// UI/UX antes de implementar: só em milestone com tela (m.ui, ou detectado por agente barato pelas features). O desenho
+// nunca espera aprovação: se o agente cair, a missão segue sem ele e registra no log.
+async function desenharUi(m, aFazer) {
+  if (designs[m.titulo]) return
+  let ui = m.ui
+  if (!ui) {
+    const r = await comRetentativa(`telas: ${m.titulo}`, () => agent(
+      `Features do milestone "${m.titulo}":\n${aFazer.map(f => `- ${f.titulo}: ${f.spec}`).join('\n')}\n` +
+      'Se alguma cria ou muda tela, diálogo, formulário ou fluxo que um usuário percorre, descreva em ui as telas e ' +
+      'fluxos, numa linha cada; senão devolva ui vazio. Não rode nada.',
+      { label: `telas: ${m.titulo}`, phase: 'UI/UX', schema: TELAS, model: CONFIG.modeloConferencia, effort: 'low' },
+    ))
+    ui = r?.ui?.trim()
+  }
+  if (!ui) {
+    designs[m.titulo] = { semTela: true }
+    return
+  }
+  const r = await comRetentativa(`design: ${m.titulo}`, () => trabalhar(montar('ui-ux',
+    `Desenhe as telas e fluxos do milestone "${m.titulo}" (critério: ${m.criterio}): ${ui}\nFeatures:\n` +
+    aFazer.map(f => `- ${f.titulo}: ${f.spec}`).join('\n') + '\n' +
+    'Se a skill /design, a skill impeccable ou a ferramenta Artifact de design estiver disponível, use-a para produzir o ' +
+    'desenho e devolva os links em links. Em todo caso, devolva em texto, por tela: objetivo, elementos, componentes do ' +
+    'design system do projeto, estados (carregando, vazio, erro, sucesso) e o fluxo de entrada e saída. Aplique o ' +
+    'checklist de UX. Não espere aprovação de ninguém: decida e siga. Não altere código do produto.\n' + GIT_PROIBIDO, guiasDe(m)),
+    { label: `design: ${m.titulo}`, phase: 'UI/UX', schema: DESIGN },
+  ))
+  if (!r) {
+    log(`${m.titulo}: o agente de UI/UX não respondeu; a missão segue sem desenho para este milestone`)
+    return
+  }
+  designs[m.titulo] = { ui, links: r.links ?? [], texto: r.texto, desvios: [] }
+}
+
 // Áreas de caça-bug quando o plano não traz m.caca: um agente barato as deriva dos arquivos tocados.
 async function areasDeCaca(m, arquivos) {
   const r = await comRetentativa(`áreas de caça: ${m.titulo}`, () => agent(
@@ -1145,7 +1203,9 @@ async function testarComoUsuario(m, anteriores) {
     'Use só a stack local: pode subir os serviços locais com os comandos do projeto e usar navegador; nunca aponte ' +
     'para produção nem use credencial real. Não altere código. Ao terminar, derrube o que subiu e deixe a árvore como ' +
     'estava. Aprove só se a jornada inteira funcionar; cada falha vira um problema com o passo e a evidência. Se não ' +
-    `der para subir a stack (ambiente), marque ambiente=true.${memoria}\n${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`, guiasDe(m)),
+    `der para subir a stack (ambiente), marque ambiente=true.` +
+    (blocoDesign(m.titulo) ? `${blocoDesign(m.titulo)}\nConfira as telas prontas contra o desenho e o checklist de UX: cada desvio vira problema.` : '') +
+    `${memoria}\n${SAIDA_EM_ARQUIVO}\n${GIT_PROIBIDO}`, guiasDe(m)),
     { label: `user testing: ${m.titulo}`, phase: 'User testing', schema: VALIDACAO },
   ))
   if (!r) return { erro: 'o agente de user testing não respondeu' }
@@ -1154,6 +1214,8 @@ async function testarComoUsuario(m, anteriores) {
   if (!r.aprovado && deAmbiente.length) {
     return { erro: `o user testing não roda por causa do ambiente: ${deAmbiente.map(p => p.problema).join(' | ')}. Ajuste o ambiente e retome` }
   }
+  const d = designs[m.titulo]
+  if (d && !d.semTela) d.desvios = [...new Set([...(d.desvios ?? []), ...r.problemas.map(textoDoAchado)])]
   return { aprovado: r.aprovado, problemas: r.problemas }
 }
 
@@ -1169,9 +1231,9 @@ function guiasDe(m) {
 function parar(m, base, feitas, commits, extra, jaConcluidas = []) {
   const concluidas = [...jaConcluidas, ...feitas.map(x => x.feature)]
   return {
-    parouEm: m.titulo, ...extra, plano: { milestones }, contexto, aprendizados: contexto.aprendizados,
+    parouEm: m.titulo, ...extra, plano: { milestones }, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados,
     sugestaoAprendizados: sugestaoAprendizados(),
-    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial },
+    retomar: { aPartirDe: m.titulo, branch: preparo.branch, inicioMissao: INICIO_MISSAO, base, head, commits: [...commits], concluidas, plano: { milestones }, contexto, deFora: [...deForaAceitos], bugsCorrigidos: [...bugsCorrigidos], cacaFinalFeita, modo: MODO, medicaoAntes, antesParcial, designs: { ...designs } },
     relatorio: [...relatorio, { milestone: m.titulo, commits: `${base}..${head}`, features: feitas }],
   }
 }
@@ -1216,7 +1278,7 @@ for (const [i, m] of pendentes.entries()) {
     if (extra.motivo) log(`Parando em "${m.titulo}": ${extra.motivo}`)
     return parar(m, base, feitas, commits, extra, jaConcluidas)
   }
-  const features = aFazer.map(f => ({ ...f, guias: guiaPorFeature.has(f.titulo) ? [guiaPorFeature.get(f.titulo)] : [] }))
+  const features = aFazer.map(f => ({ ...f, milestone: m.titulo, guias: guiaPorFeature.has(f.titulo) ? [guiaPorFeature.get(f.titulo)] : [] }))
   const guiasDoMilestone = guiasDe(m)
   let conf = null
   // Rodadas de correção do milestone, contadas em sequência por scrutiny, caça bug e user testing.
@@ -1239,6 +1301,7 @@ for (const [i, m] of pendentes.entries()) {
             'que continua no modelo alvo não se desativam, pulam nem enfraquecem; não mexa em limites de cobertura para passar.'
           : 'Corrija a causa: não desative, pule nem enfraqueça testes, e não mexa em limites de cobertura para passar.'),
       guias: guiasDoMilestone,
+      milestone: m.titulo,
       etapa: 'corrigir',
     }))
     const fix = await implementar(correcoes, 'Corrigir')
@@ -1272,6 +1335,7 @@ for (const [i, m] of pendentes.entries()) {
   if (!m.suite && aFazer.length) {
     const e = await provarContrato(m, aFazer)
     if (e) return pararAqui(e)
+    await desenharUi(m, aFazer)
   }
 
   const impl = await implementar(features, 'Implementar')
@@ -1363,4 +1427,4 @@ for (const [i, m] of pendentes.entries()) {
 }
 
 const enxugar = MODO === 'enxugar' ? { modo: MODO, medicao: { antes: medicaoAntes, depois: medicaoDepois, ...(antesParcial ? { antesParcial: true } : {}) } } : {}
-return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, ...enxugar, contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }
+return { concluido: true, branch: preparo.branch, base: INICIO_MISSAO, head, plano: { milestones }, aceite, ...enxugar, designs: listaDesigns(), contexto, aprendizados: contexto.aprendizados, sugestaoAprendizados: sugestaoAprendizados(), relatorio }

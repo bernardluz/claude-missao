@@ -51,6 +51,8 @@ const problemas = (n, prefixo) => Array.from({ length: n }, (_, i) => ({ problem
 //   refuta             o segundo verificador refuta todos os achados
 //   userTesting        { [milestone]: [n falhas por rodada] } resultado do user testing
 //   semMedicao         o pré-voo não devolve a medição mesmo quando o prompt a pede
+//   ui                 { [milestone]: texto } telas que o agente barato detecta (padrão: nenhuma)
+//   designLinks        links que o agente de UI/UX devolve
 //   foraImpacta     resposta do agente que julga commit de fora (padrão true: para como antes)
 //   conferenciaErro    texto de erro que o agente de conferência sempre devolve (ex.: erro do git)
 //   conferenciaResumida vezes que a conferência devolve só o último commit, com a contagem real
@@ -149,6 +151,8 @@ export async function executar(fonte, args, opcoes = {}, estado = { git: ['base0
       const n = (o.suite ?? [])[rodadaSuite++] ?? 0
       return { aprovado: n === 0, problemas: problemas(n, 's') }
     }
+    if (l.startsWith('telas: ')) return { ui: o.ui?.[l.slice(7)] ?? '' }
+    if (l.startsWith('design: ')) return { texto: `desenho de ${l.slice(8)}: seletor pesquisável de conta`, links: o.designLinks ?? [] }
     if (l.startsWith('contrato: ')) return { premissas: o.contratoFalso?.[l.slice(10)] ?? [] }
     if (l.startsWith('áreas de caça: ')) return { areas: o.areasCaca ?? ['geral'] }
     const caca = l.match(/^caça: .* \((.+), rodada (\d+)\)$/)

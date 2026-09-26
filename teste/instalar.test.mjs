@@ -153,7 +153,7 @@ test('embute a técnica de cada etapa; o projeto complementa ou substitui, e eta
   writeFileSync(join(dir, 'aceite.md'), '<!-- substitui -->\nSó o do projeto.\n')
   const etapas = lerEtapas(raiz)
   assert.deepEqual(Object.keys(etapas).filter(k => !k.endsWith('.enxugar')), ['aceite', 'caca-bug', 'corrigir', 'implementar', 'planejar', 'pre-voo',
-    'prova-de-contrato', 'revisar', 'scrutiny', 'user-testing', 'verificar-simplicidade'])
+    'prova-de-contrato', 'revisar', 'scrutiny', 'ui-ux', 'user-testing', 'verificar-simplicidade'])
   const nucleoImplementar = readFileSync(join(ETAPAS_DIR, 'implementar.md'), 'utf8').replace(/\r\n/g, '\n').trim()
   assert.equal(etapas.implementar, `${nucleoImplementar}\n\nDo projeto:\nUse o Maven wrapper.`)
   assert.equal(etapas.aceite, 'Só o do projeto.')
@@ -278,6 +278,6 @@ test('instala a skill enxugar-codigo e embute os complementos .enxugar das etapa
   const etapas = lerEtapas(raiz)
   assert.deepEqual(Object.keys(etapas).filter(k => k.endsWith('.enxugar')), ['aceite.enxugar', 'caca-bug.enxugar',
     'corrigir.enxugar', 'implementar.enxugar', 'planejar.enxugar', 'pre-voo.enxugar', 'prova-de-contrato.enxugar',
-    'revisar.enxugar', 'scrutiny.enxugar', 'verificar-simplicidade.enxugar'])
+    'revisar.enxugar', 'scrutiny.enxugar', 'ui-ux.enxugar', 'verificar-simplicidade.enxugar'])
   assert.ok(readFileSync(destino, 'utf8').includes(JSON.stringify(etapas['implementar.enxugar'])))
 })
